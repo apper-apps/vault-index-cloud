@@ -58,6 +58,32 @@ const Loading = ({ type = 'default' }) => {
         </div>
       </div>
     )
+}
+
+  if (type === 'preview') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-64 space-y-4">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-8 h-8 border-3 border-purple-500 border-t-transparent rounded-full"
+        />
+        <p className="text-sm text-gray-600">Loading preview...</p>
+      </div>
+    )
+  }
+
+  if (type === 'share') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-32 space-y-4">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full"
+        />
+        <p className="text-sm text-gray-600">Generating share link...</p>
+      </div>
+    )
   }
 
   return (

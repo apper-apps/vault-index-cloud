@@ -1,4 +1,5 @@
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Upload } from '@aws-sdk/lib-storage'
 import bucketConfigService from '@/services/api/bucketConfigService'
 
@@ -309,9 +310,43 @@ class S3Service {
     
     const parts = this.currentPath.split('/')
     return parts.map((part, index) => ({
-      name: part,
+name: part,
       path: parts.slice(0, index + 1).join('/')
     }))
+  }
+
+  async getFilePreviewUrl(fileKey) {
+    try {
+      await this.ensureClient()
+      
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: fileKey
+      })
+
+      // Generate presigned URL valid for 1 hour
+      const url = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 })
+      return url
+    } catch (error) {
+      throw new Error(`Failed to generate preview URL: ${error.message}`)
+    }
+  }
+
+  async generateShareUrl(fileKey, expiresInSeconds = 3600) {
+    try {
+      await this.ensureClient()
+      
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: fileKey
+      })
+
+      // Generate presigned URL with custom expiration
+      const url = await getSignedUrl(this.s3Client, command, { expiresIn: expiresInSeconds })
+      return url
+    } catch (error) {
+      throw new Error(`Failed to generate share URL: ${error.message}`)
+    }
   }
 }
 export default new S3Service()
