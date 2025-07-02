@@ -1,4 +1,6 @@
-import s3FilesData from '@/services/mockData/s3Files.json'
+import React from "react";
+import Error from "@/components/ui/Error";
+import s3FilesData from "@/services/mockData/s3Files.json";
 
 class S3Service {
   constructor() {
@@ -192,7 +194,7 @@ class S3Service {
     if (!this.currentPath) return []
     
     const parts = this.currentPath.split('/')
-    return parts.map((part, index) => ({
+return parts.map((part, index) => ({
       name: part,
       path: parts.slice(0, index + 1).join('/')
     }))

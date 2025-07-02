@@ -1,26 +1,34 @@
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { toast } from 'react-toastify'
-import { format } from 'date-fns'
-import Button from '@/components/atoms/Button'
-import SearchBar from '@/components/molecules/SearchBar'
-import FileTypeIcon from '@/components/molecules/FileTypeIcon'
-import Loading from '@/components/ui/Loading'
-import Error from '@/components/ui/Error'
-import Empty from '@/components/ui/Empty'
-import s3Service from '@/services/api/s3Service'
-import ApperIcon from '@/components/ApperIcon'
+import React, { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "react-toastify";
+import { format } from "date-fns";
+import { CopyToClipboard } from "react-copy-to-clipboard";
+import { Document, Page, pdfjs } from "react-pdf";
+import ApperIcon from "@/components/ApperIcon";
+import Button from "@/components/atoms/Button";
+import SearchBar from "@/components/molecules/SearchBar";
+import FileTypeIcon from "@/components/molecules/FileTypeIcon";
+import Error from "@/components/ui/Error";
+import Empty from "@/components/ui/Empty";
+import Loading from "@/components/ui/Loading";
+import s3Service from "@/services/api/s3Service";
+
+// Set up PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
 
 const FileBrowser = ({ currentPath = '', onPathChange, onRefresh, className = "" }) => {
   const [files, setFiles] = useState([])
   const [filteredFiles, setFilteredFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [selectedFiles, setSelectedFiles] = useState(new Set())
+const [selectedFiles, setSelectedFiles] = useState(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
-
+  const [previewFile, setPreviewFile] = useState(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const [shareModalFile, setShareModalFile] = useState(null)
+  const [showShareModal, setShowShareModal] = useState(false)
   useEffect(() => {
     loadFiles()
   }, [currentPath])
@@ -414,16 +422,32 @@ const FileBrowser = ({ currentPath = '', onPathChange, onRefresh, className = ""
                         {formatDate(file.lastModified)}
                       </div>
                       
-                      {/* Actions */}
-                      <div className="col-span-2 flex items-center justify-center gap-2">
+{/* Actions */}
+                      <div className="col-span-2 flex items-center justify-center gap-1">
                         {!file.isFolder && (
-                          <Button
-                            onClick={() => handleDownload(file.key, file.name)}
-                            variant="ghost"
-                            size="sm"
-                            icon="Download"
-                            className="text-aws-blue hover:text-aws-blue hover:bg-aws-blue/10"
-                          />
+                          <>
+                            <Button
+                              onClick={() => handlePreview(file)}
+                              variant="ghost"
+                              size="sm"
+                              icon="Eye"
+                              className="text-purple-600 hover:text-purple-600 hover:bg-purple-600/10"
+                            />
+                            <Button
+                              onClick={() => handleShare(file)}
+                              variant="ghost"
+                              size="sm"
+                              icon="Share2"
+                              className="text-green-600 hover:text-green-600 hover:bg-green-600/10"
+                            />
+                            <Button
+                              onClick={() => handleDownload(file.key, file.name)}
+                              variant="ghost"
+                              size="sm"
+                              icon="Download"
+                              className="text-aws-blue hover:text-aws-blue hover:bg-aws-blue/10"
+                            />
+                          </>
                         )}
                         
                         <Button
@@ -442,6 +466,252 @@ const FileBrowser = ({ currentPath = '', onPathChange, onRefresh, className = ""
           </div>
         </div>
       )}
+
+      {/* File Preview Modal */}
+      <AnimatePresence>
+        {showPreview && previewFile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            onClick={() => setShowPreview(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-lg font-semibold">{previewFile.name}</h3>
+                <Button
+                  onClick={() => setShowPreview(false)}
+                  variant="ghost"
+                  size="sm"
+                  icon="X"
+                />
+              </div>
+              <div className="p-4 max-h-[70vh] overflow-auto">
+                <FilePreviewContent file={previewFile} />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Share Modal */}
+      <AnimatePresence>
+        {showShareModal && shareModalFile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+            onClick={() => setShowShareModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              className="bg-white rounded-lg max-w-md w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Share File</h3>
+                <Button
+                  onClick={() => setShowShareModal(false)}
+                  variant="ghost"
+                  size="sm"
+                  icon="X"
+                />
+              </div>
+              <div className="p-4">
+                <ShareFileContent file={shareModalFile} />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+
+  // Handler functions for preview and share
+  const handlePreview = (file) => {
+    setPreviewFile(file)
+    setShowPreview(true)
+  }
+
+  const handleShare = (file) => {
+    setShareModalFile(file)
+    setShowShareModal(true)
+  }
+}
+
+// File Preview Component
+const FilePreviewContent = ({ file }) => {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState(null)
+
+  useEffect(() => {
+    loadPreview()
+  }, [file])
+
+  const loadPreview = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const url = await s3Service.getFilePreviewUrl(file.key)
+      setPreviewUrl(url)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) return <Loading type="preview" />
+  if (error) return <Error message={error} onRetry={loadPreview} />
+
+  const isImage = file.type?.startsWith('image/')
+  const isPdf = file.type === 'application/pdf'
+  const isText = file.type?.startsWith('text/') || 
+                 ['application/json', 'application/xml'].includes(file?.type)
+
+  return (
+    <div className="space-y-4">
+      {isImage && (
+        <img
+          src={previewUrl}
+          alt={file.name}
+          className="max-w-full max-h-96 object-contain mx-auto"
+        />
+      )}
+      
+      {isPdf && (
+        <div className="border rounded">
+          <Document
+            file={previewUrl}
+            onLoadError={() => setError('Failed to load PDF')}
+          >
+            <Page pageNumber={1} width={600} />
+          </Document>
+        </div>
+      )}
+      
+      {isText && (
+        <iframe
+          src={previewUrl}
+          className="w-full h-96 border rounded"
+          title={file.name}
+        />
+      )}
+      
+      {!isImage && !isPdf && !isText && (
+        <div className="text-center py-8 text-gray-500">
+          <FileTypeIcon type={file.type} className="w-16 h-16 mx-auto mb-4" />
+          <p>Preview not available for this file type</p>
+          <Button
+            onClick={() => window.open(previewUrl, '_blank')}
+            variant="outline"
+            className="mt-4"
+            icon="ExternalLink"
+          >
+            Open in new tab
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Share File Component
+const ShareFileContent = ({ file }) => {
+  const [shareUrl, setShareUrl] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [expiresIn, setExpiresIn] = useState(24) // hours
+
+  useEffect(() => {
+    generateShareUrl()
+  }, [file, expiresIn])
+
+  const generateShareUrl = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const url = await s3Service.generateShareUrl(file.key, expiresIn * 3600) // convert to seconds
+      setShareUrl(url)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) return <Loading type="share" />
+  if (error) return <Error message={error} onRetry={generateShareUrl} />
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Link expires in:
+        </label>
+        <select
+          value={expiresIn}
+          onChange={(e) => setExpiresIn(Number(e.target.value))}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-aws-blue focus:ring-2 focus:ring-aws-blue/20"
+        >
+          <option value={1}>1 hour</option>
+          <option value={24}>24 hours</option>
+          <option value={168}>7 days</option>
+          <option value={720}>30 days</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Share URL:
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={shareUrl}
+            readOnly
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm"
+          />
+          <CopyToClipboard
+            text={shareUrl}
+            onCopy={() => toast.success('Link copied to clipboard!')}
+          >
+            <Button variant="outline" size="sm" icon="Copy">
+              Copy
+            </Button>
+          </CopyToClipboard>
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-4">
+        <Button
+          onClick={() => window.open(shareUrl, '_blank')}
+          variant="outline"
+          icon="ExternalLink"
+          className="flex-1"
+        >
+          Test Link
+        </Button>
+        <Button
+          onClick={generateShareUrl}
+          variant="outline"
+          icon="RefreshCw"
+          className="flex-1"
+        >
+          Regenerate
+        </Button>
+      </div>
     </div>
   )
 }
