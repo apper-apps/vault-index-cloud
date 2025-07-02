@@ -8,64 +8,47 @@ import StatusIndicator from "@/components/molecules/StatusIndicator";
 import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
-
 // Enhanced serialization for Apper SDK with comprehensive DataCloneError prevention
 const serializeForApper = (obj) => {
+  // Use global safeSerialize if available, otherwise fallback to local implementation
+  if (window.safeSerialize) {
+    return window.safeSerialize(obj)
+  }
+  
   try {
-    if (obj === null || obj === undefined) return null
+    if (obj === null || obj === undefined) return obj
     
-    // Global seen set to track circular references across all levels
     const seen = new WeakSet()
     
-    const serialize = (value) => {
-      if (value === null || value === undefined) return value
+    const serialize = (item) => {
+      if (item === null || item === undefined) return item
       
-      // Handle primitives first
-      if (typeof value !== 'object') {
-        if (typeof value === 'function') return '[Function]'
-        if (typeof value === 'symbol') return '[Symbol]'
-        if (typeof value === 'bigint') return value.toString()
-        return value
+      if (typeof item !== 'object') {
+        if (typeof item === 'function') return '[Function]'
+        if (typeof item === 'symbol') return '[Symbol]'
+        if (typeof item === 'bigint') return item.toString()
+        return item
       }
       
-      // Check for circular references
-      if (seen.has(value)) return '[Circular Reference]'
-      seen.add(value)
+      if (seen.has(item)) return '[Circular Reference]'
+      seen.add(item)
       
-// Handle built-in objects that can cause DataCloneError
-      if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack }
-      if (value instanceof Date) return value.toISOString()
-      if (value instanceof RegExp) return value.toString()
-      if (typeof File !== 'undefined' && value instanceof File) return { name: value.name, size: value.size, type: value.type, lastModified: value.lastModified }
-      if (typeof Blob !== 'undefined' && value instanceof Blob) return { size: value.size, type: value.type }
+      // Handle problematic objects that cause DataCloneError
+      if (item instanceof Request || item instanceof Response) return '[Request/Response Object]'
+      if (item instanceof Promise) return '[Promise Object]'
+      if (item instanceof WeakMap || item instanceof WeakSet) return '[WeakMap/WeakSet Object]'
+      if (item instanceof ArrayBuffer) return '[ArrayBuffer]'
+      if (ArrayBuffer.isView(item)) return '[TypedArray/DataView]'
       
-      // Handle objects that definitely cannot be cloned
-      if ((typeof Request !== 'undefined' && value instanceof Request) || (typeof Response !== 'undefined' && value instanceof Response)) return '[Request/Response Object]'
-      if (value instanceof Promise) return '[Promise Object]'
-      if (value instanceof WeakMap || value instanceof WeakSet) return '[WeakMap/WeakSet Object]'
-      if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) return '[ArrayBuffer]'
-      if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) return '[TypedArray/DataView]'
+      if (item instanceof Date) return item.toISOString()
+      if (item instanceof Error) return { name: item.name, message: item.message, stack: item.stack }
+      if (item instanceof File) return { name: item.name, size: item.size, type: item.type, lastModified: item.lastModified }
+      if (item instanceof Blob) return { size: item.size, type: item.type }
       
-      // Handle DOM objects
-      if (typeof Window !== 'undefined' && value instanceof Window) return '[Window Object]'
-      if (typeof Document !== 'undefined' && value instanceof Document) return '[Document Object]'
-      if (typeof Element !== 'undefined' && value instanceof Element) return '[DOM Element]'
-      if (typeof Node !== 'undefined' && value instanceof Node) return '[DOM Node]'
-      if (typeof Event !== 'undefined' && value instanceof Event) return '[Event Object]'
-      // Handle Proxy objects and complex constructors
-      try {
-        if (value.constructor && value.constructor.name === 'Object' && Object.getPrototypeOf(value) !== Object.prototype) {
-          return '[Proxy/Complex Object]'
-        }
-      } catch (e) {
-        return '[Unserializable Object]'
-      }
-      
-      // Handle arrays
-      if (Array.isArray(value)) {
-        return value.map(item => {
+      if (Array.isArray(item)) {
+        return item.map(subItem => {
           try {
-            return serialize(item)
+            return serialize(subItem)
           } catch (e) {
             console.warn('Failed to serialize array item:', e)
             return '[Unserializable Item]'
@@ -73,12 +56,11 @@ const serializeForApper = (obj) => {
         })
       }
       
-      // Handle plain objects
       const result = {}
       try {
-        for (const [key, val] of Object.entries(value)) {
+        for (const [key, value] of Object.entries(item)) {
           try {
-            result[key] = serialize(val)
+            result[key] = serialize(value)
           } catch (e) {
             console.warn(`Failed to serialize property ${key}:`, e)
             result[key] = '[Unserializable Property]'
@@ -87,13 +69,12 @@ const serializeForApper = (obj) => {
       } catch (e) {
         return '[Object Enumeration Failed]'
       }
-      
       return result
     }
     
     const serialized = serialize(obj)
     
-    // Final validation - attempt JSON stringify to ensure it's truly serializable
+    // Final validation
     try {
       JSON.stringify(serialized)
     } catch (e) {
@@ -103,12 +84,8 @@ const serializeForApper = (obj) => {
     
     return serialized
   } catch (error) {
-    console.error('Critical serialization failure:', error)
-    return {
-      error: 'Serialization failed',
-      originalType: typeof obj,
-      timestamp: new Date().toISOString()
-    }
+    console.warn('Critical serialization failure:', error)
+    return { error: 'Serialization failed', originalType: typeof obj, timestamp: new Date().toISOString() }
   }
 }
 
@@ -177,26 +154,29 @@ const handleTestConnection = async () => {
     try {
       setTesting(true)
       
-      // Create serializable test data to prevent postMessage errors
       const testData = {
-        name: String(formData.name || '').trim(),
-        accessKey: String(formData.accessKey || '').trim(),
-        secretKey: String(formData.secretKey || '').trim(),
-        region: String(formData.region || '').trim(),
-        bucketName: String(formData.bucketName || '').trim()
+        accessKey: formData.accessKey?.trim(),
+        secretKey: formData.secretKey?.trim(),
+        region: formData.region?.trim(),
+        bucketName: formData.bucketName?.trim()
       }
       
-      await bucketConfigService.testConnection(testData)
-      toast.success('Connection test successful!')
+      const result = await bucketConfigService.testConnection(testData)
+      
+      if (result.success) {
+        toast.success('Connection test successful!')
+      } else {
+        toast.error(result.message || 'Connection test failed')
+      }
     } catch (err) {
-      console.error('Connection test error:', err)
-      toast.error(err.message || 'Connection test failed')
+      console.error('Test connection error:', err)
+      toast.error(err.message || 'Failed to test connection')
     } finally {
       setTesting(false)
     }
   }
 
-const handleSaveConfig = async () => {
+  const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
@@ -213,41 +193,69 @@ const handleSaveConfig = async () => {
       const savedConfig = await bucketConfigService.create(serializedFormData)
       await loadConfigs()
       
-      // Safely notify Apper of configuration change
-      if (window.Apper && typeof window.Apper.notifyConfigChange === 'function') {
-        try {
-          const apperNotificationData = serializeForApper({
-            type: 'CONFIG_SAVED',
-            config: {
-              id: savedConfig?.id,
-              name: savedConfig?.name,
-              region: savedConfig?.region,
-              timestamp: new Date().toISOString()
-            }
-          })
-          
-          // Use safe postMessage if available
-          if (window.safePostMessage) {
-            window.safePostMessage(window.parent, apperNotificationData, 'https://apper.integrately.com')
-          } else {
-            window.Apper.notifyConfigChange(apperNotificationData)
-          }
-        } catch (postMessageError) {
-          console.warn('Failed to notify Apper of config change:', postMessageError)
-          // Don't fail the save operation if notification fails
-        }
-      }
-      
-      // Reset form
+      // Reset form and hide it
       setFormData({
         name: '',
         accessKey: '',
         secretKey: '',
         region: 'us-east-1',
-        bucketName: '',
+        bucketName: ''
       })
-      setIsEditing(false)
       setShowForm(false)
+      
+      // Notify Apper about the new configuration with safe postMessage
+      if (window.parent && window.parent.postMessage) {
+        const apperNotificationData = serializeForApper({
+          type: 'S3_CONFIG_SAVED',
+          config: {
+            id: savedConfig.id,
+            name: savedConfig.name,
+            bucketName: savedConfig.bucketName,
+            region: savedConfig.region,
+            isActive: savedConfig.isActive,
+            createdAt: savedConfig.createdAt
+          }
+        })
+        
+        try {
+          // Use global safePostMessage if available
+          if (window.safePostMessage) {
+            window.safePostMessage(window.parent, apperNotificationData, '*')
+          } else {
+            window.parent.postMessage(apperNotificationData, '*')
+          }
+        } catch (postError) {
+          console.warn('Failed to notify Apper about config save:', postError)
+          if (postError.name === 'DataCloneError') {
+            console.error('DataCloneError: Configuration data contains non-cloneable objects')
+            // Send minimal fallback notification
+            try {
+              window.parent.postMessage({
+                type: 'S3_CONFIG_SAVED_ERROR',
+                error: 'Configuration saved but notification failed due to data serialization',
+                configId: savedConfig.id,
+                timestamp: Date.now()
+              }, '*')
+            } catch (fallbackError) {
+              console.error('Even fallback notification failed:', fallbackError)
+            }
+          }
+        }
+      }
+      
+      // Call callback if provided
+      if (onConfigSaved) {
+        const serializedConfig = serializeForApper({
+          id: savedConfig.id,
+          name: savedConfig.name,
+          bucketName: savedConfig.bucketName,
+          region: savedConfig.region,
+          isActive: savedConfig.isActive,
+          createdAt: savedConfig.createdAt
+        })
+        onConfigSaved(serializedConfig)
+      }
+      
       toast.success('Configuration saved successfully!')
     } catch (err) {
       console.error('Save config error:', err)
@@ -261,15 +269,55 @@ const handleSetActive = async (configId) => {
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
       toast.success('Configuration activated!')
       
+      // Notify Apper about the active config change with safe postMessage
+      if (window.parent && window.parent.postMessage) {
+        const serializedConfig = serializeForApper({
+          type: 'S3_CONFIG_ACTIVATED',
+          config: {
+            id: updatedConfig.Id,
+            name: updatedConfig.name,
+            bucketName: updatedConfig.bucketName,
+            region: updatedConfig.region,
+            isActive: updatedConfig.isActive,
+            activatedAt: new Date().toISOString()
+          }
+        })
+        
+        try {
+          // Use global safePostMessage if available
+          if (window.safePostMessage) {
+            window.safePostMessage(window.parent, serializedConfig, '*')
+          } else {
+            window.parent.postMessage(serializedConfig, '*')
+          }
+        } catch (postError) {
+          console.warn('Failed to notify Apper about config activation:', postError)
+          if (postError.name === 'DataCloneError') {
+            console.error('DataCloneError: Config activation data contains non-cloneable objects')
+            // Send minimal fallback notification
+            try {
+              window.parent.postMessage({
+                type: 'S3_CONFIG_ACTIVATED_ERROR',
+                error: 'Configuration activated but notification failed due to data serialization',
+                configId: updatedConfig.Id,
+                timestamp: Date.now()
+              }, '*')
+            } catch (fallbackError) {
+              console.error('Even fallback notification failed:', fallbackError)
+            }
+          }
+        }
+      }
+      
       // Serialize config data to prevent DataCloneError
-      const serializedConfig = {
+      const serializedConfig = serializeForApper({
         Id: updatedConfig.Id,
         name: updatedConfig.name,
         bucketName: updatedConfig.bucketName,
         region: updatedConfig.region,
         isActive: updatedConfig.isActive,
         activatedAt: new Date().toISOString()
-      }
+      })
       onConfigSaved?.(serializedConfig)
     } catch (err) {
       console.error('Configuration activation error:', err)
@@ -360,8 +408,9 @@ const handleSetActive = async (configId) => {
                 error={formErrors.accessKey}
                 placeholder="AKIAIOSFODNN7EXAMPLE"
                 required
-              />
-<Input
+/>
+              
+              <Input
                 label="Secret Key"
                 type="password"
                 value={formData.secretKey}
@@ -385,9 +434,9 @@ const handleSetActive = async (configId) => {
               <Input
                 label="Bucket Name"
                 value={formData.bucketName}
-                onChange={(e) => handleInputChange('bucketName', e.target.value)}
+onChange={(e) => handleInputChange('bucketName', e.target.value)}
                 error={formErrors.bucketName}
-placeholder="my-s3-bucket"
+                placeholder="my-s3-bucket"
                 required
               />
             </div>

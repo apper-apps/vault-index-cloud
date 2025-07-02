@@ -1,11 +1,10 @@
-import { useState, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { toast } from 'react-toastify'
-import Button from '@/components/atoms/Button'
-import ProgressBar from '@/components/atoms/ProgressBar'
-import s3Service from '@/services/api/s3Service'
-import ApperIcon from '@/components/ApperIcon'
-
+import React, { useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "react-toastify";
+import ApperIcon from "@/components/ApperIcon";
+import ProgressBar from "@/components/atoms/ProgressBar";
+import Button from "@/components/atoms/Button";
+import s3Service from "@/services/api/s3Service";
 const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) => {
   const [isDragOver, setIsDragOver] = useState(false)
   const [uploadTasks, setUploadTasks] = useState([])
@@ -77,6 +76,16 @@ const handleFileUpload = async (files) => {
           
           toast.success(`Successfully uploaded ${file.name}`)
 
+          // Notify parent window about upload completion
+          await notifyParent({
+            type: 'FILE_UPLOAD_COMPLETE',
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type,
+            path: currentPath,
+            timestamp: new Date().toISOString()
+          })
+
         } catch (error) {
           setUploadTasks(prev => prev.map(t => 
             t.id === taskId 
@@ -85,6 +94,15 @@ const handleFileUpload = async (files) => {
           ))
           
           toast.error(`Failed to upload ${file.name}: ${error.message}`)
+
+          // Notify parent about upload failure
+          await notifyParent({
+            type: 'FILE_UPLOAD_FAILED',
+            fileName: file.name,
+            error: error.message,
+            path: currentPath,
+            timestamp: new Date().toISOString()
+          })
         }
 
         return task
@@ -99,27 +117,56 @@ const handleFileUpload = async (files) => {
       }, 2000)
 
     } catch (err) {
-      toast.error('Failed to start upload: ' + err.message)
+      console.error('Upload batch failed:', err)
+      toast.error(`Upload failed: ${err.message}`)
     } finally {
       setIsUploading(false)
     }
   }
 
-  const removeTask = (taskId) => {
-    setUploadTasks(prev => prev.filter(task => task.id !== taskId))
+  const notifyParent = async (data) => {
+    if (!window.parent || !window.parent.postMessage) return
+
+    try {
+      // Use global safePostMessage if available
+      if (window.safePostMessage) {
+        window.safePostMessage(window.parent, data, '*')
+      } else if (window.safeSerialize) {
+        const serializedData = window.safeSerialize(data)
+        window.parent.postMessage(serializedData, '*')
+      } else {
+        window.parent.postMessage(data, '*')
+      }
+    } catch (postError) {
+      console.warn('Failed to notify parent:', postError)
+      if (postError.name === 'DataCloneError') {
+        console.error('DataCloneError: Notification data contains non-cloneable objects')
+        // Send minimal fallback notification
+        try {
+          window.parent.postMessage({
+            type: 'NOTIFICATION_ERROR',
+            error: 'Notification failed due to data serialization',
+            fileName: data.fileName || 'unknown',
+            timestamp: Date.now()
+          }, '*')
+        } catch (fallbackError) {
+          console.error('Even fallback notification failed:', fallbackError)
+        }
+      }
+    }
   }
 
-const retryTask = async (taskId) => {
+  const retryTask = async (taskId) => {
     const task = uploadTasks.find(t => t.id === taskId)
     if (!task) return
 
-    try {
-      setUploadTasks(prev => prev.map(t => 
-        t.id === taskId 
-          ? { ...t, status: 'uploading', progress: 0, error: null }
-          : t
-      ))
+    setUploadTasks(prev => prev.map(t => 
+      t.id === taskId 
+        ? { ...t, status: 'uploading', progress: 0, error: null }
+        : t
+    ))
 
+    try {
       await s3Service.uploadFile(task.file, currentPath, (progress, speed) => {
         setUploadTasks(prev => prev.map(t => 
           t.id === taskId 
@@ -136,19 +183,28 @@ const retryTask = async (taskId) => {
       
       toast.success(`Successfully uploaded ${task.file.name}`)
 
-      setTimeout(() => {
-        removeTask(taskId)
-        onUploadComplete?.()
-      }, 2000)
+      // Notify parent about successful retry
+      await notifyParent({
+        type: 'FILE_UPLOAD_COMPLETE',
+        fileName: task.file.name,
+        fileSize: task.file.size,
+        fileType: task.file.type,
+        path: currentPath,
+        timestamp: new Date().toISOString()
+      })
 
-    } catch (err) {
+    } catch (error) {
       setUploadTasks(prev => prev.map(t => 
         t.id === taskId 
-          ? { ...t, status: 'error', error: err.message }
+          ? { ...t, status: 'error', error: error.message }
           : t
       ))
-      toast.error(`Retry failed: ${err.message}`)
+      toast.error(`Retry failed: ${error.message}`)
     }
+  }
+
+  const removeTask = (taskId) => {
+    setUploadTasks(prev => prev.filter(t => t.id !== taskId))
   }
 
   const formatFileSize = (bytes) => {
