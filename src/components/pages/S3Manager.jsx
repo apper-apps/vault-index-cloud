@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "react-toastify";
+import ApperIcon from "@/components/ApperIcon";
 import ConfigurationPanel from "@/components/organisms/ConfigurationPanel";
 import FileUploader from "@/components/organisms/FileUploader";
 import FileBrowser from "@/components/organisms/FileBrowser";
 import bucketConfigService from "@/services/api/bucketConfigService";
-import ApperIcon from "@/components/ApperIcon";
 
-const S3Manager = () => {
+const S3ManagerPage = () => {
   const [activeConfig, setActiveConfig] = useState(null)
   const [currentPath, setCurrentPath] = useState('')
   const [activeTab, setActiveTab] = useState('browser')
@@ -41,8 +41,10 @@ const S3Manager = () => {
 const handleUploadComplete = () => {
     // Refresh file browser if it's the active tab
     if (activeTab === 'browser') {
-      window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+      window.dispatchEvent(new CustomEvent('refreshFiles'))
     }
+    // Force a reload of the active config to ensure consistency
+    loadActiveConfig()
   }
 
   const handleRefresh = () => {
@@ -203,4 +205,4 @@ const handleUploadComplete = () => {
   )
 }
 
-export default S3Manager
+export default S3ManagerPage

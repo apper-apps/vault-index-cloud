@@ -40,63 +40,48 @@ const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) =>
     e.target.value = '' // Reset input
   }
 
-  const handleFileUpload = async (files) => {
+const handleFileUpload = async (files) => {
     if (files.length === 0) return
 
     try {
       setIsUploading(true)
       
-      // Initialize upload tasks
-      const initialTasks = files.map(file => ({
-        id: Math.random().toString(36).substr(2, 9),
-        file: file,
-        progress: 0,
-        status: 'pending',
-        speed: 0,
-        error: null
-      }))
-      
-      setUploadTasks(initialTasks)
+      // Use actual S3 service for uploads
+      const uploadTasks = await s3Service.uploadFiles(files, currentPath)
+      setUploadTasks(uploadTasks)
 
-      // Simulate file uploads with progress
-      for (const task of initialTasks) {
-        try {
-          task.status = 'uploading'
-          setUploadTasks(prev => [...prev])
-
-          // Simulate upload progress
-          for (let progress = 0; progress <= 100; progress += Math.random() * 20 + 5) {
-            task.progress = Math.min(100, Math.round(progress))
-            task.speed = Math.random() * 5 + 1 // MB/s
+      // Monitor upload progress
+      const monitorProgress = () => {
+        uploadTasks.forEach(task => {
+          if (task.status === 'uploading') {
+            // Update progress display
             setUploadTasks(prev => [...prev])
-            await new Promise(resolve => setTimeout(resolve, 100))
-          }
-
-          // Simulate occasional failures (10% chance)
-          if (Math.random() < 0.1) {
-            task.status = 'error'
-            task.error = 'Upload failed due to network error'
-            toast.error(`Failed to upload ${task.file.name}`)
-          } else {
-            task.status = 'completed'
-            task.progress = 100
+          } else if (task.status === 'completed') {
             toast.success(`Successfully uploaded ${task.file.name}`)
+          } else if (task.status === 'error') {
+            toast.error(`Failed to upload ${task.file.name}: ${task.error}`)
           }
-          
-          setUploadTasks(prev => [...prev])
-        } catch (err) {
-          task.status = 'error'
-          task.error = err.message
-          toast.error(`Failed to upload ${task.file.name}: ${err.message}`)
-          setUploadTasks(prev => [...prev])
+        })
+
+        // Check if all uploads are complete
+        const allComplete = uploadTasks.every(task => 
+          task.status === 'completed' || task.status === 'error'
+        )
+
+        if (allComplete) {
+          // Clear completed tasks after a delay
+          setTimeout(() => {
+            setUploadTasks(prev => prev.filter(task => task.status === 'error'))
+            onUploadComplete?.()
+          }, 2000)
+        } else {
+          // Continue monitoring
+          setTimeout(monitorProgress, 500)
         }
       }
 
-      // Clear completed tasks after a delay
-      setTimeout(() => {
-        setUploadTasks(prev => prev.filter(task => task.status === 'error'))
-        onUploadComplete?.()
-      }, 2000)
+      // Start monitoring
+      monitorProgress()
 
     } catch (err) {
       toast.error('Failed to start upload: ' + err.message)

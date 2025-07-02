@@ -1,5 +1,3 @@
-import React from "react";
-import Error from "@/components/ui/Error";
 import s3FilesData from "@/services/mockData/s3Files.json";
 
 class S3Service {
