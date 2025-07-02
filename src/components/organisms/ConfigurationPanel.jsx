@@ -1,13 +1,34 @@
-import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { toast } from 'react-toastify'
-import Input from '@/components/atoms/Input'
-import Button from '@/components/atoms/Button'
-import StatusIndicator from '@/components/molecules/StatusIndicator'
-import Loading from '@/components/ui/Loading'
-import Error from '@/components/ui/Error'
-import bucketConfigService from '@/services/api/bucketConfigService'
-import ApperIcon from '@/components/ApperIcon'
+import React, { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { toast } from "react-toastify";
+import ApperIcon from "@/components/ApperIcon";
+import Input from "@/components/atoms/Input";
+import Button from "@/components/atoms/Button";
+import StatusIndicator from "@/components/molecules/StatusIndicator";
+import Error from "@/components/ui/Error";
+import Loading from "@/components/ui/Loading";
+import bucketConfigService from "@/services/api/bucketConfigService";
+
+// Helper to serialize objects for Apper SDK to prevent DataCloneError
+const serializeForApper = (obj) => {
+  if (!obj || typeof obj !== 'object') return obj
+  
+  const serialized = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value instanceof Date) {
+      serialized[key] = value.toISOString()
+    } else if (typeof value === 'function') {
+      // Skip functions as they can't be serialized
+      continue
+    } else if (typeof value === 'object' && value !== null) {
+      // Recursively serialize nested objects (prevent circular refs)
+      serialized[key] = JSON.parse(JSON.stringify(value))
+    } else {
+      serialized[key] = value
+    }
+  }
+  return serialized
+}
 
 const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
   const [configs, setConfigs] = useState([])
@@ -93,11 +114,11 @@ const handleTestConnection = async () => {
     }
   }
 
-const handleSaveConfig = async () => {
+  const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
-      // Serialize form data to prevent DataCloneError in cross-origin messaging
+      // Create serializable form data
       const serializedFormData = {
         name: String(formData.name || '').trim(),
         accessKey: String(formData.accessKey || '').trim(),
@@ -119,19 +140,31 @@ const handleSaveConfig = async () => {
       })
       setShowForm(false)
       toast.success('Configuration saved successfully!')
-      
-      // Ensure serializable data for callback to prevent postMessage errors
-      const callbackData = {
+
+      // Serialize callback data for Apper SDK
+      const callbackData = serializeForApper({
         Id: savedConfig.Id,
         name: savedConfig.name,
         bucketName: savedConfig.bucketName,
         region: savedConfig.region,
         isActive: savedConfig.isActive,
         createdAt: savedConfig.createdAt
+      })
+
+      // Trigger Apper SDK callback if available
+      if (window.Apper && window.Apper.triggerEvent) {
+        try {
+          window.Apper.triggerEvent('config_saved', callbackData)
+        } catch (error) {
+          console.warn('Failed to trigger Apper event:', error)
+        }
       }
-      onConfigSaved?.(callbackData)
+
+      if (onConfigSaved) {
+        onConfigSaved(savedConfig)
+      }
     } catch (err) {
-      console.error('Configuration save error:', err)
+      console.error('Save config error:', err)
       toast.error(err.message || 'Failed to save configuration')
     }
   }
@@ -253,9 +286,8 @@ const handleSetActive = async (configId) => {
                 placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCY..."
                 required
               />
-            </div>
 </div>
-
+          </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Region"
@@ -273,7 +305,8 @@ const handleSetActive = async (configId) => {
                 error={formErrors.bucketName}
                 placeholder="my-s3-bucket"
                 required
-              />
+/>
+            </div>
 
             <div className="flex gap-3 pt-4">
               <Button

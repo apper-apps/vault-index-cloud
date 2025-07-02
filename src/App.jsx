@@ -18,7 +18,7 @@ function App() {
         
         script.onload = () => {
           // Initialize Apper with proper error handling
-          if (window.Apper) {
+if (window.Apper) {
             try {
               window.Apper.init({
                 projectId: import.meta.env.VITE_APPER_PROJECT_ID,
@@ -30,11 +30,6 @@ function App() {
                 onReady: () => {
                   console.log('Apper SDK initialized successfully')
                   setApperReady(true)
-                },
-                // Prevent DataCloneError by configuring message serialization
-                messageOptions: {
-                  serialize: true,
-                  maxDepth: 3
                 }
               })
             } catch (initError) {
