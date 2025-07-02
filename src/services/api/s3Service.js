@@ -314,6 +314,4 @@ class S3Service {
     }))
   }
 }
-
-export default new S3Service()
 export default new S3Service()
