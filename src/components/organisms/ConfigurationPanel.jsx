@@ -9,18 +9,18 @@ import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
-// Enhanced serialization for Apper SDK with comprehensive error handling
+// Enhanced serialization for Apper SDK with comprehensive DataCloneError prevention
 const serializeForApper = (obj) => {
   try {
     if (obj === null || obj === undefined) return null
     
-    // Handle circular references and non-serializable objects
+    // Global seen set to track circular references across all levels
     const seen = new WeakSet()
     
     const serialize = (value) => {
       if (value === null || value === undefined) return value
       
-      // Handle primitives
+      // Handle primitives first
       if (typeof value !== 'object') {
         if (typeof value === 'function') return '[Function]'
         if (typeof value === 'symbol') return '[Symbol]'
@@ -28,18 +28,38 @@ const serializeForApper = (obj) => {
         return value
       }
       
-      // Handle circular references
+      // Check for circular references
       if (seen.has(value)) return '[Circular Reference]'
       seen.add(value)
       
-      // Handle special objects
+// Handle built-in objects that can cause DataCloneError
+      if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack }
       if (value instanceof Date) return value.toISOString()
       if (value instanceof RegExp) return value.toString()
-      if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack }
-      if (value instanceof File) return { name: value.name, size: value.size, type: value.type, lastModified: value.lastModified }
-      if (value instanceof Request || value instanceof Response) return '[Request/Response Object]'
-      if (value instanceof ArrayBuffer) return '[ArrayBuffer]'
-      if (ArrayBuffer.isView(value)) return '[TypedArray]'
+      if (typeof File !== 'undefined' && value instanceof File) return { name: value.name, size: value.size, type: value.type, lastModified: value.lastModified }
+      if (typeof Blob !== 'undefined' && value instanceof Blob) return { size: value.size, type: value.type }
+      
+      // Handle objects that definitely cannot be cloned
+      if ((typeof Request !== 'undefined' && value instanceof Request) || (typeof Response !== 'undefined' && value instanceof Response)) return '[Request/Response Object]'
+      if (value instanceof Promise) return '[Promise Object]'
+      if (value instanceof WeakMap || value instanceof WeakSet) return '[WeakMap/WeakSet Object]'
+      if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) return '[ArrayBuffer]'
+      if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) return '[TypedArray/DataView]'
+      
+      // Handle DOM objects
+      if (typeof Window !== 'undefined' && value instanceof Window) return '[Window Object]'
+      if (typeof Document !== 'undefined' && value instanceof Document) return '[Document Object]'
+      if (typeof Element !== 'undefined' && value instanceof Element) return '[DOM Element]'
+      if (typeof Node !== 'undefined' && value instanceof Node) return '[DOM Node]'
+      if (typeof Event !== 'undefined' && value instanceof Event) return '[Event Object]'
+      // Handle Proxy objects and complex constructors
+      try {
+        if (value.constructor && value.constructor.name === 'Object' && Object.getPrototypeOf(value) !== Object.prototype) {
+          return '[Proxy/Complex Object]'
+        }
+      } catch (e) {
+        return '[Unserializable Object]'
+      }
       
       // Handle arrays
       if (Array.isArray(value)) {
@@ -53,20 +73,19 @@ const serializeForApper = (obj) => {
         })
       }
       
-      // Handle objects
+      // Handle plain objects
       const result = {}
-      for (const [key, val] of Object.entries(value)) {
-        try {
-          // Skip non-enumerable properties and functions
-          if (typeof val === 'function') {
-            result[key] = '[Function]'
-            continue
+      try {
+        for (const [key, val] of Object.entries(value)) {
+          try {
+            result[key] = serialize(val)
+          } catch (e) {
+            console.warn(`Failed to serialize property ${key}:`, e)
+            result[key] = '[Unserializable Property]'
           }
-          result[key] = serialize(val)
-        } catch (e) {
-          console.warn(`Failed to serialize property ${key}:`, e)
-          result[key] = '[Unserializable]'
         }
+      } catch (e) {
+        return '[Object Enumeration Failed]'
       }
       
       return result
@@ -74,8 +93,13 @@ const serializeForApper = (obj) => {
     
     const serialized = serialize(obj)
     
-    // Validate that the result is actually JSON serializable
-    JSON.stringify(serialized)
+    // Final validation - attempt JSON stringify to ensure it's truly serializable
+    try {
+      JSON.stringify(serialized)
+    } catch (e) {
+      console.warn('Serialized data still not JSON compatible:', e)
+      return { error: 'Final serialization check failed', originalType: typeof obj }
+    }
     
     return serialized
   } catch (error) {

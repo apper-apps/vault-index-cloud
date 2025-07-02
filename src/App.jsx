@@ -1,7 +1,7 @@
+import "@/index.css";
 import { Route, Routes } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import React, { useEffect, useState } from "react";
-import "@/index.css";
 import Error from "@/components/ui/Error";
 import S3Manager from "@/components/pages/S3Manager";
 
@@ -9,48 +9,100 @@ function App() {
   const [apperReady, setApperReady] = useState(false)
   const [apperError, setApperError] = useState(null)
 // Helper function to safely serialize data for postMessage
-  const safeSerialize = (data) => {
+const safeSerialize = (data) => {
     try {
-      // Handle common non-serializable objects
+      // Global seen set to track circular references across all levels
+      const seen = new WeakSet()
+      
       const serialize = (obj) => {
         if (obj === null || obj === undefined) return obj
-        if (typeof obj === 'function') return '[Function]'
+        
+        // Handle primitives first
+        if (typeof obj !== 'object') {
+          if (typeof obj === 'function') return '[Function]'
+          if (typeof obj === 'symbol') return '[Symbol]'
+          if (typeof obj === 'bigint') return obj.toString()
+          return obj
+        }
+        
+        // Check for circular references
+        if (seen.has(obj)) return '[Circular Reference]'
+        seen.add(obj)
+        
+        // Handle built-in objects that can cause DataCloneError
         if (obj instanceof Error) return { name: obj.name, message: obj.message, stack: obj.stack }
-        if (obj instanceof Request || obj instanceof Response) return '[Request/Response Object]'
-        if (obj instanceof File) return { name: obj.name, size: obj.size, type: obj.type }
         if (obj instanceof Date) return obj.toISOString()
         if (obj instanceof RegExp) return obj.toString()
+        if (obj instanceof File) return { name: obj.name, size: obj.size, type: obj.type, lastModified: obj.lastModified }
+        if (obj instanceof Blob) return { size: obj.size, type: obj.type }
         
-        if (Array.isArray(obj)) {
-          return obj.map(serialize)
-        }
+        // Handle objects that definitely cannot be cloned
+        if (obj instanceof Request || obj instanceof Response) return '[Request/Response Object]'
+        if (obj instanceof Promise) return '[Promise Object]'
+        if (obj instanceof WeakMap || obj instanceof WeakSet) return '[WeakMap/WeakSet Object]'
+        if (obj instanceof ArrayBuffer) return '[ArrayBuffer]'
+        if (ArrayBuffer.isView(obj)) return '[TypedArray/DataView]'
         
-        if (typeof obj === 'object') {
-          const seen = new WeakSet()
-          const serializeObject = (o) => {
-            if (seen.has(o)) return '[Circular Reference]'
-            seen.add(o)
-            
-            const result = {}
-            for (const [key, value] of Object.entries(o)) {
-              try {
-                result[key] = serialize(value)
-              } catch (e) {
-                result[key] = '[Unserializable]'
-              }
-            }
-            return result
+        // Handle DOM objects
+        if (typeof Window !== 'undefined' && obj instanceof Window) return '[Window Object]'
+        if (typeof Document !== 'undefined' && obj instanceof Document) return '[Document Object]'
+        if (typeof Element !== 'undefined' && obj instanceof Element) return '[DOM Element]'
+        if (typeof Node !== 'undefined' && obj instanceof Node) return '[DOM Node]'
+        if (typeof Event !== 'undefined' && obj instanceof Event) return '[Event Object]'
+        
+        // Handle Proxy objects
+        try {
+          if (obj.constructor && obj.constructor.name === 'Object' && Object.getPrototypeOf(obj) !== Object.prototype) {
+            return '[Proxy/Complex Object]'
           }
-          return serializeObject(obj)
+        } catch (e) {
+          return '[Unserializable Object]'
         }
         
-        return obj
+        // Handle arrays
+        if (Array.isArray(obj)) {
+          return obj.map(item => {
+            try {
+              return serialize(item)
+            } catch (e) {
+              console.warn('Failed to serialize array item:', e)
+              return '[Unserializable Item]'
+            }
+          })
+        }
+        
+        // Handle plain objects
+        const result = {}
+        try {
+          for (const [key, value] of Object.entries(obj)) {
+            try {
+              result[key] = serialize(value)
+            } catch (e) {
+              console.warn(`Failed to serialize property ${key}:`, e)
+              result[key] = '[Unserializable Property]'
+            }
+          }
+        } catch (e) {
+          return '[Object Enumeration Failed]'
+        }
+        
+        return result
       }
       
-      return serialize(data)
+      const serialized = serialize(data)
+      
+      // Final validation - attempt JSON stringify to ensure it's truly serializable
+      try {
+        JSON.stringify(serialized)
+      } catch (e) {
+        console.warn('Serialized data still not JSON compatible:', e)
+        return { error: 'Final serialization check failed', originalType: typeof data }
+      }
+      
+      return serialized
     } catch (error) {
-      console.warn('Serialization failed:', error)
-      return { error: 'Serialization failed', originalType: typeof data }
+      console.warn('Critical serialization failure:', error)
+      return { error: 'Serialization failed', originalType: typeof data, timestamp: new Date().toISOString() }
     }
   }
 
