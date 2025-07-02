@@ -1,0 +1,20 @@
+[
+  {
+    "Id": 1,
+    "name": "Production Bucket",
+    "accessKey": "AKIAIOSFODNN7EXAMPLE",
+    "secretKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "region": "us-east-1",
+    "bucketName": "my-production-bucket",
+    "isActive": true
+  },
+  {
+    "Id": 2,
+    "name": "Development Bucket",
+    "accessKey": "AKIAIOSFODNN7DEVTEST",
+    "secretKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYDEVTEST",
+    "region": "us-west-2",
+    "bucketName": "my-dev-bucket",
+    "isActive": false
+  }
+]
