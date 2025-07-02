@@ -68,25 +68,46 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
     }
   }
 
-  const handleTestConnection = async () => {
+const handleTestConnection = async () => {
     if (!validateForm()) return
     
     try {
       setTesting(true)
-      await bucketConfigService.testConnection(formData)
+      
+      // Create serializable test data to prevent postMessage errors
+      const testData = {
+        name: String(formData.name || '').trim(),
+        accessKey: String(formData.accessKey || '').trim(),
+        secretKey: String(formData.secretKey || '').trim(),
+        region: String(formData.region || '').trim(),
+        bucketName: String(formData.bucketName || '').trim()
+      }
+      
+      await bucketConfigService.testConnection(testData)
       toast.success('Connection test successful!')
     } catch (err) {
-      toast.error(err.message)
+      console.error('Connection test error:', err)
+      toast.error(err.message || 'Connection test failed')
     } finally {
       setTesting(false)
     }
   }
 
-  const handleSaveConfig = async () => {
+const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
-      const savedConfig = await bucketConfigService.create(formData)
+      // Serialize form data to prevent DataCloneError in cross-origin messaging
+      const serializedFormData = {
+        name: String(formData.name || '').trim(),
+        accessKey: String(formData.accessKey || '').trim(),
+        secretKey: String(formData.secretKey || '').trim(),
+        region: String(formData.region || '').trim(),
+        bucketName: String(formData.bucketName || '').trim(),
+        timestamp: new Date().toISOString()
+      }
+      
+      const savedConfig = await bucketConfigService.create(serializedFormData)
       setConfigs(prev => [...prev, savedConfig])
       setActiveConfig(savedConfig)
       setFormData({
@@ -98,21 +119,43 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
       })
       setShowForm(false)
       toast.success('Configuration saved successfully!')
-      onConfigSaved?.(savedConfig)
+      
+      // Ensure serializable data for callback to prevent postMessage errors
+      const callbackData = {
+        Id: savedConfig.Id,
+        name: savedConfig.name,
+        bucketName: savedConfig.bucketName,
+        region: savedConfig.region,
+        isActive: savedConfig.isActive,
+        createdAt: savedConfig.createdAt
+      }
+      onConfigSaved?.(callbackData)
     } catch (err) {
-      toast.error(err.message)
+      console.error('Configuration save error:', err)
+      toast.error(err.message || 'Failed to save configuration')
     }
   }
 
-  const handleSetActive = async (configId) => {
+const handleSetActive = async (configId) => {
     try {
       const updatedConfig = await bucketConfigService.setActive(configId)
       setActiveConfig(updatedConfig)
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
       toast.success('Configuration activated!')
-      onConfigSaved?.(updatedConfig)
+      
+      // Serialize config data to prevent DataCloneError
+      const serializedConfig = {
+        Id: updatedConfig.Id,
+        name: updatedConfig.name,
+        bucketName: updatedConfig.bucketName,
+        region: updatedConfig.region,
+        isActive: updatedConfig.isActive,
+        activatedAt: new Date().toISOString()
+      }
+      onConfigSaved?.(serializedConfig)
     } catch (err) {
-      toast.error(err.message)
+      console.error('Configuration activation error:', err)
+      toast.error(err.message || 'Failed to activate configuration')
     }
   }
 
