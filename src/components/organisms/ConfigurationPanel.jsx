@@ -277,7 +277,7 @@ const handleSetActive = async (configId) => {
                 required
               />
 
-              <Input
+<Input
                 label="Secret Key"
                 type="password"
                 value={formData.secretKey}
@@ -286,8 +286,8 @@ const handleSetActive = async (configId) => {
                 placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCY..."
                 required
               />
-</div>
-          </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Region"
