@@ -9,35 +9,89 @@ import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
-// Helper to serialize objects for Apper SDK to prevent DataCloneError
+// Enhanced serialization for Apper SDK with comprehensive error handling
 const serializeForApper = (obj) => {
-  if (!obj || typeof obj !== 'object') return obj
-  
-  const serialized = {}
-  for (const [key, value] of Object.entries(obj)) {
-    if (value instanceof Date) {
-      serialized[key] = value.toISOString()
-    } else if (typeof value === 'function') {
-      // Skip functions as they can't be serialized
-      continue
-    } else if (typeof value === 'object' && value !== null) {
-      // Recursively serialize nested objects (prevent circular refs)
-      serialized[key] = JSON.parse(JSON.stringify(value))
-    } else {
-      serialized[key] = value
+  try {
+    if (obj === null || obj === undefined) return null
+    
+    // Handle circular references and non-serializable objects
+    const seen = new WeakSet()
+    
+    const serialize = (value) => {
+      if (value === null || value === undefined) return value
+      
+      // Handle primitives
+      if (typeof value !== 'object') {
+        if (typeof value === 'function') return '[Function]'
+        if (typeof value === 'symbol') return '[Symbol]'
+        if (typeof value === 'bigint') return value.toString()
+        return value
+      }
+      
+      // Handle circular references
+      if (seen.has(value)) return '[Circular Reference]'
+      seen.add(value)
+      
+      // Handle special objects
+      if (value instanceof Date) return value.toISOString()
+      if (value instanceof RegExp) return value.toString()
+      if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack }
+      if (value instanceof File) return { name: value.name, size: value.size, type: value.type, lastModified: value.lastModified }
+      if (value instanceof Request || value instanceof Response) return '[Request/Response Object]'
+      if (value instanceof ArrayBuffer) return '[ArrayBuffer]'
+      if (ArrayBuffer.isView(value)) return '[TypedArray]'
+      
+      // Handle arrays
+      if (Array.isArray(value)) {
+        return value.map(item => {
+          try {
+            return serialize(item)
+          } catch (e) {
+            console.warn('Failed to serialize array item:', e)
+            return '[Unserializable Item]'
+          }
+        })
+      }
+      
+      // Handle objects
+      const result = {}
+      for (const [key, val] of Object.entries(value)) {
+        try {
+          // Skip non-enumerable properties and functions
+          if (typeof val === 'function') {
+            result[key] = '[Function]'
+            continue
+          }
+          result[key] = serialize(val)
+        } catch (e) {
+          console.warn(`Failed to serialize property ${key}:`, e)
+          result[key] = '[Unserializable]'
+        }
+      }
+      
+      return result
+    }
+    
+    const serialized = serialize(obj)
+    
+    // Validate that the result is actually JSON serializable
+    JSON.stringify(serialized)
+    
+    return serialized
+  } catch (error) {
+    console.error('Critical serialization failure:', error)
+    return {
+      error: 'Serialization failed',
+      originalType: typeof obj,
+      timestamp: new Date().toISOString()
     }
   }
-  return serialized
 }
 
-const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
+const ConfigurationPanel = ({ className, onConfigSaved }) => {
   const [configs, setConfigs] = useState([])
-  const [activeConfig, setActiveConfig] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [testing, setTesting] = useState(false)
-  const [showForm, setShowForm] = useState(false)
-  
   const [formData, setFormData] = useState({
     name: '',
     accessKey: '',
@@ -45,6 +99,10 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
     region: 'us-east-1',
     bucketName: ''
   })
+  const [isEditing, setIsEditing] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [activeConfig, setActiveConfig] = useState(null)
 
   const [formErrors, setFormErrors] = useState({})
 
@@ -114,61 +172,64 @@ const handleTestConnection = async () => {
     }
   }
 
-  const handleSaveConfig = async () => {
+const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
-      // Create serializable form data
-      const serializedFormData = {
-        name: String(formData.name || '').trim(),
-        accessKey: String(formData.accessKey || '').trim(),
-        secretKey: String(formData.secretKey || '').trim(),
-        region: String(formData.region || '').trim(),
-        bucketName: String(formData.bucketName || '').trim(),
+      // Serialize callback data for Apper SDK
+      const serializedFormData = serializeForApper({
+        name: formData.name?.trim(),
+        accessKey: formData.accessKey?.trim(),
+        secretKey: formData.secretKey?.trim(),
+        region: formData.region?.trim(),
+        bucketName: formData.bucketName?.trim(),
         timestamp: new Date().toISOString()
+      })
+
+      const savedConfig = await bucketConfigService.create(serializedFormData)
+      await loadConfigs()
+      
+      // Safely notify Apper of configuration change
+      if (window.Apper && typeof window.Apper.notifyConfigChange === 'function') {
+        try {
+          const apperNotificationData = serializeForApper({
+            type: 'CONFIG_SAVED',
+            config: {
+              id: savedConfig?.id,
+              name: savedConfig?.name,
+              region: savedConfig?.region,
+              timestamp: new Date().toISOString()
+            }
+          })
+          
+          // Use safe postMessage if available
+          if (window.safePostMessage) {
+            window.safePostMessage(window.parent, apperNotificationData, 'https://apper.integrately.com')
+          } else {
+            window.Apper.notifyConfigChange(apperNotificationData)
+          }
+        } catch (postMessageError) {
+          console.warn('Failed to notify Apper of config change:', postMessageError)
+          // Don't fail the save operation if notification fails
+        }
       }
       
-      const savedConfig = await bucketConfigService.create(serializedFormData)
-      setConfigs(prev => [...prev, savedConfig])
-      setActiveConfig(savedConfig)
+      // Reset form
       setFormData({
         name: '',
         accessKey: '',
         secretKey: '',
         region: 'us-east-1',
-        bucketName: ''
+        bucketName: '',
       })
+      setIsEditing(false)
       setShowForm(false)
       toast.success('Configuration saved successfully!')
-
-      // Serialize callback data for Apper SDK
-      const callbackData = serializeForApper({
-        Id: savedConfig.Id,
-        name: savedConfig.name,
-        bucketName: savedConfig.bucketName,
-        region: savedConfig.region,
-        isActive: savedConfig.isActive,
-        createdAt: savedConfig.createdAt
-      })
-
-      // Trigger Apper SDK callback if available
-      if (window.Apper && window.Apper.triggerEvent) {
-        try {
-          window.Apper.triggerEvent('config_saved', callbackData)
-        } catch (error) {
-          console.warn('Failed to trigger Apper event:', error)
-        }
-      }
-
-      if (onConfigSaved) {
-        onConfigSaved(savedConfig)
-      }
     } catch (err) {
       console.error('Save config error:', err)
       toast.error(err.message || 'Failed to save configuration')
     }
   }
-
 const handleSetActive = async (configId) => {
     try {
       const updatedConfig = await bucketConfigService.setActive(configId)
@@ -276,7 +337,6 @@ const handleSetActive = async (configId) => {
                 placeholder="AKIAIOSFODNN7EXAMPLE"
                 required
               />
-
 <Input
                 label="Secret Key"
                 type="password"
@@ -303,9 +363,9 @@ const handleSetActive = async (configId) => {
                 value={formData.bucketName}
                 onChange={(e) => handleInputChange('bucketName', e.target.value)}
                 error={formErrors.bucketName}
-                placeholder="my-s3-bucket"
+placeholder="my-s3-bucket"
                 required
-/>
+              />
             </div>
 
             <div className="flex gap-3 pt-4">
