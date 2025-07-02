@@ -211,30 +211,17 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
                 required
               />
             </div>
+</div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Region <span className="text-error">*</span>
-                </label>
-                <select
-                  value={formData.region}
-                  onChange={(e) => handleInputChange('region', e.target.value)}
-                  className="input-field"
-                >
-                  <option value="us-east-1">US East (N. Virginia)</option>
-                  <option value="us-east-2">US East (Ohio)</option>
-                  <option value="us-west-1">US West (N. California)</option>
-                  <option value="us-west-2">US West (Oregon)</option>
-                  <option value="eu-west-1">Europe (Ireland)</option>
-                  <option value="eu-central-1">Europe (Frankfurt)</option>
-                  <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
-                  <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
-                </select>
-                {formErrors.region && (
-                  <p className="text-sm text-error">{formErrors.region}</p>
-                )}
-              </div>
+              <Input
+                label="Region"
+                value={formData.region}
+                onChange={(e) => handleInputChange('region', e.target.value)}
+                error={formErrors.region}
+                placeholder="us-east-1"
+                required
+              />
 
               <Input
                 label="Bucket Name"
@@ -244,7 +231,6 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
                 placeholder="my-s3-bucket"
                 required
               />
-            </div>
 
             <div className="flex gap-3 pt-4">
               <Button
