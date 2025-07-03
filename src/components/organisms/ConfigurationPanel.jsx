@@ -9,225 +9,25 @@ import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
-// Enhanced safe serialization function for Apper communication
-function serializeForApper(obj, visited = new WeakSet()) {
-  try {
-    // Handle null/undefined/primitives first
-    if (obj === null || obj === undefined) return obj;
-    
-    // Handle primitives - exclude problematic types
-    if (typeof obj !== 'object') {
-      if (typeof obj === 'function' || typeof obj === 'symbol' || typeof obj === 'undefined') {
-        return null; // Return null instead of string representation
-      }
-      // Handle bigint
-      if (typeof obj === 'bigint') {
-        return obj.toString();
-      }
-      return obj;
-    }
-    
-    // Handle circular references
-    if (visited.has(obj)) {
-      return null; // Return null instead of string to avoid cloning issues
-    }
-    visited.add(obj);
-    
-    // Handle Date objects first (before general object checking)
-    if (obj instanceof Date) {
-      return obj.toISOString();
-    }
-    
-// Comprehensive detection of all non-cloneable Web API objects and DOM elements
-    if (
-      // Core Web API objects
-      (typeof Request !== 'undefined' && Request && obj instanceof Request) || 
-      (typeof Response !== 'undefined' && Response && obj instanceof Response) || 
-      (typeof FormData !== 'undefined' && FormData && obj instanceof FormData) || 
-      (typeof File !== 'undefined' && File && obj instanceof File) || 
-      (typeof Blob !== 'undefined' && Blob && obj instanceof Blob) || 
-      (typeof ArrayBuffer !== 'undefined' && ArrayBuffer && obj instanceof ArrayBuffer) ||
-      (typeof SharedArrayBuffer !== 'undefined' && SharedArrayBuffer && obj instanceof SharedArrayBuffer) ||
-      
-      // DOM elements and nodes
-      (typeof Element !== 'undefined' && Element && obj instanceof Element) || 
-      (typeof Node !== 'undefined' && Node && obj instanceof Node) ||
-      (typeof HTMLElement !== 'undefined' && HTMLElement && obj instanceof HTMLElement) ||
-      (typeof SVGElement !== 'undefined' && SVGElement && obj instanceof SVGElement) ||
-      obj.nodeType !== undefined || // Any DOM node
-      obj.window !== undefined || // Window objects
-      
-      // Other problematic types
-      obj instanceof Error || obj instanceof RegExp ||
-      obj instanceof Map || obj instanceof Set ||
-      obj instanceof Promise || obj instanceof WeakMap ||
-      obj instanceof WeakSet || 
-      typeof obj.then === 'function' || // Promises and thenables
-      
-      // Stream objects
-      (typeof ReadableStream !== 'undefined' && ReadableStream && obj instanceof ReadableStream) ||
-      (typeof WritableStream !== 'undefined' && WritableStream && obj instanceof WritableStream) ||
-      (typeof TransformStream !== 'undefined' && TransformStream && obj instanceof TransformStream) ||
-      
-      // Constructor name pattern matching for safety
-      obj.constructor?.name?.includes('Request') ||
-      obj.constructor?.name?.includes('Response') ||
-      obj.constructor?.name?.includes('Element') ||
-      obj.constructor?.name?.includes('HTML') ||
-      obj.constructor?.name?.includes('SVG') ||
-      obj.constructor?.name?.includes('Stream') ||
-      obj.constructor?.name?.includes('Buffer') ||
-      
-      // Event objects
-      (typeof Event !== 'undefined' && Event && obj instanceof Event) ||
-      obj.constructor?.name?.includes('Event')
-    ) {
-      return null; // Return null to completely avoid serialization
-    }
-    
-    // Handle Arrays
-    if (Array.isArray(obj)) {
-      const cleaned = obj.map(item => serializeForApper(item, visited))
-                        .filter(item => item !== null && item !== undefined);
-      visited.delete(obj);
-      return cleaned;
-    }
-    
-    // Handle plain objects - only process enumerable own properties
-    const result = {};
-    
+// Simple notification helper that only sends primitive data
+function notifyParent(data) {
+  if (window.parent && window.parent.postMessage) {
     try {
-      // Use Object.entries for better safety
-      for (const [key, value] of Object.entries(obj)) {
-        // Skip non-string keys
-        if (typeof key !== 'string') continue;
-        
-        const serializedValue = serializeForApper(value, visited);
-        if (serializedValue !== null && serializedValue !== undefined) {
-          result[key] = serializedValue;
-        }
-      }
+      const safeData = {
+        type: typeof data.type === 'string' ? data.type : 'notification',
+        status: typeof data.status === 'string' ? data.status : 'info',
+        message: typeof data.message === 'string' ? data.message : '',
+        timestamp: Date.now()
+      };
+      window.parent.postMessage(safeData, '*');
     } catch (error) {
-      console.warn('Error during object serialization:', error);
-      visited.delete(obj);
-      return null;
+      console.warn('Failed to notify parent:', error);
     }
-    
-    visited.delete(obj);
-    return result;
-  } catch (error) {
-    console.error('Critical serialization error:', error);
-    return null; // Return null instead of error object
-  }
-}
-
-// Enhanced validation for serialized data with comprehensive checks
-function validateSerializedData(data) {
-  if (data === null || data === undefined) return true;
-  
-  try {
-    // Test JSON serialization/deserialization round trip
-    const jsonString = JSON.stringify(data);
-    if (jsonString === undefined || jsonString === null) return false;
-    
-    const parsed = JSON.parse(jsonString);
-    if (parsed === undefined) return false;
-    
-    // Deep validation to ensure no problematic data
-    const validateDeep = (obj, depth = 0) => {
-      // Prevent infinite recursion
-      if (depth > 50) return false;
-      
-      if (obj === null || obj === undefined) return true;
-      if (typeof obj !== 'object') {
-        // Check for non-serializable primitives
-        return typeof obj !== 'function' && typeof obj !== 'symbol' && typeof obj !== 'undefined';
-      }
-      
-// Check for problematic object types
-      if ((typeof Request !== 'undefined' && Request && obj instanceof Request) || 
-          (typeof Response !== 'undefined' && Response && obj instanceof Response) || 
-          (typeof FormData !== 'undefined' && FormData && obj instanceof FormData) || 
-          (typeof File !== 'undefined' && File && obj instanceof File) || 
-          (typeof Blob !== 'undefined' && Blob && obj instanceof Blob) || 
-          obj instanceof Error ||
-          (typeof ArrayBuffer !== 'undefined' && ArrayBuffer && obj instanceof ArrayBuffer) || 
-          (typeof SharedArrayBuffer !== 'undefined' && SharedArrayBuffer && obj instanceof SharedArrayBuffer) ||
-          obj.constructor?.name?.includes('Request') ||
-          obj.constructor?.name?.includes('Response') ||
-          obj.constructor?.name?.includes('Stream') ||
-          obj.nodeType !== undefined) {
-        return false;
-      }
-      
-      if (Array.isArray(obj)) {
-        return obj.every(item => validateDeep(item, depth + 1));
-      }
-      
-      // Validate object properties
-      try {
-        for (const [key, value] of Object.entries(obj)) {
-          if (typeof key !== 'string') return false;
-          if (!validateDeep(value, depth + 1)) return false;
-        }
-        return true;
-      } catch (error) {
-        return false;
-      }
-    };
-    
-    return validateDeep(parsed);
-  } catch (error) {
-    console.error('Data validation failed:', error);
-    return false;
-  }
-}
-
-// Enhanced safe postMessage wrapper with comprehensive error handling
-function safePostMessage(targetWindow, data, targetOrigin = '*') {
-  try {
-    // First serialize the data
-    const serializedData = serializeForApper(data);
-    
-    // Validate serialized data
-    if (!validateSerializedData(serializedData)) {
-      console.warn('Data failed validation before postMessage');
-      return false;
-    }
-    
-    // Final JSON test
-    const testSerialization = JSON.stringify(serializedData);
-    if (testSerialization === undefined) {
-      console.warn('Final JSON serialization failed');
-      return false;
-    }
-    
-    targetWindow.postMessage(serializedData, targetOrigin);
-    return true;
-  } catch (error) {
-    console.error('SafePostMessage failed:', error);
-    
-    // Handle specific DataCloneError
-    if (error.name === 'DataCloneError' || error.message.includes('DataCloneError')) {
-      console.error('DataCloneError detected - attempting minimal fallback');
-      try {
-        // Send minimal error notification
-        targetWindow.postMessage({
-          type: 'SERIALIZATION_ERROR',
-          error: 'DataCloneError',
-          timestamp: Date.now()
-        }, targetOrigin);
-      } catch (fallbackError) {
-        console.error('Even minimal fallback failed:', fallbackError);
-      }
-    }
-    
-    return false;
   }
 }
 
 const ConfigurationPanel = ({ className, onConfigSaved }) => {
-const [configs, setConfigs] = useState([])
+  const [configs, setConfigs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [formData, setFormData] = useState({
@@ -237,11 +37,9 @@ const [configs, setConfigs] = useState([])
     region: 'us-east-1',
     bucketName: ''
   })
-  const [isEditing, setIsEditing] = useState(false)
   const [testing, setTesting] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [activeConfig, setActiveConfig] = useState(null)
-
   const [formErrors, setFormErrors] = useState({})
 
   useEffect(() => {
@@ -285,17 +83,17 @@ const [configs, setConfigs] = useState([])
     }
   }
 
-const handleTestConnection = async () => {
+  const handleTestConnection = async () => {
     if (!validateForm()) return
     
     try {
       setTesting(true)
       
       const testData = {
-        accessKey: formData.accessKey?.trim(),
-        secretKey: formData.secretKey?.trim(),
-        region: formData.region?.trim(),
-        bucketName: formData.bucketName?.trim()
+        accessKey: formData.accessKey.trim(),
+        secretKey: formData.secretKey.trim(),
+        region: formData.region.trim(),
+        bucketName: formData.bucketName.trim()
       }
       
       const result = await bucketConfigService.testConnection(testData)
@@ -312,7 +110,8 @@ const handleTestConnection = async () => {
       setTesting(false)
     }
   }
-const handleSaveConfig = async () => {
+
+  const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
@@ -324,52 +123,30 @@ const handleSaveConfig = async () => {
         bucketName: formData.bucketName.trim()
       }
       
-      const savedConfig = await bucketConfigService.save(configData)
+      const savedConfig = await bucketConfigService.create(configData)
       
-      // Update local state
       setConfigs(prev => [...prev, savedConfig])
+      setActiveConfig(savedConfig)
       
-      // Send notification to Apper if available with enhanced error handling
-if (window.Apper) {
-        try {
-          const apperNotificationData = serializeForApper({
-            type: 'config_saved',
-            data: {
-              id: String(savedConfig?.id || ''),
-              name: String(savedConfig?.name || ''),
-              bucketName: String(savedConfig?.bucketName || ''),
-              region: String(savedConfig?.region || ''),
-              isActive: Boolean(savedConfig?.isActive)
-            },
-            timestamp: Date.now()
-          });
-          
-          // Enhanced validation
-          if (!validateSerializedData(apperNotificationData)) {
-            throw new Error('Data validation failed - contains non-serializable content');
-          }
-          
-          window.Apper.sendNotification(apperNotificationData);
-        } catch (error) {
-          console.error('Failed to send Apper notification:', error);
-          
-          // Guaranteed safe fallback notification
-          try {
-            const fallbackData = {
-              type: 'config_saved',
-              status: 'success',
-              configId: String(savedConfig?.id || 'unknown'),
-              timestamp: Date.now()
-            };
-            
-            window.Apper.sendNotification(fallbackData);
-          } catch (fallbackError) {
-            console.error('Even fallback Apper notification failed:', fallbackError);
-          }
-        }
+      // Notify parent with simple data
+      notifyParent({
+        type: 'config_saved',
+        status: 'success',
+        message: 'Configuration saved successfully'
+      })
+      
+      // Call callback if provided
+      if (onConfigSaved) {
+        onConfigSaved({
+          Id: savedConfig.Id,
+          name: savedConfig.name,
+          bucketName: savedConfig.bucketName,
+          region: savedConfig.region,
+          isActive: savedConfig.isActive
+        })
       }
       
-      // Reset form and hide it
+      // Reset form
       setFormData({
         name: '',
         accessKey: '',
@@ -379,117 +156,43 @@ if (window.Apper) {
       })
       setShowForm(false)
       
-// Notify Apper about the new configuration with enhanced safe postMessage
-      if (window.parent && window.parent.postMessage) {
-        const apperNotificationData = serializeForApper({
-          type: 'S3_CONFIG_SAVED',
-          config: {
-            id: String(savedConfig.id || ''),
-            name: String(savedConfig.name || ''),
-            bucketName: String(savedConfig.bucketName || ''),
-            region: String(savedConfig.region || ''),
-            savedAt: Date.now()
-          }
-        });
-        
-        // Use the enhanced safePostMessage function
-        const success = safePostMessage(window.parent, apperNotificationData, '*');
-        
-        if (!success) {
-          console.warn('Failed to notify Apper about config save, sending minimal fallback');
-          // Send guaranteed safe fallback notification
-          const fallbackData = {
-            type: 'S3_CONFIG_SAVED_ERROR',
-            error: 'notification_failed',
-            configId: String(savedConfig.id || 'unknown'),
-            timestamp: Date.now()
-          };
-          
-          try {
-            window.parent.postMessage(fallbackData, '*');
-          } catch (fallbackError) {
-            console.error('Even minimal fallback notification failed:', fallbackError);
-          }
-        }
-      }
-      
-      // Call callback if provided
-      if (onConfigSaved) {
-        const serializedConfig = serializeForApper({
-          id: savedConfig.id,
-          name: savedConfig.name,
-          bucketName: savedConfig.bucketName,
-          region: savedConfig.region,
-          isActive: savedConfig.isActive,
-          createdAt: savedConfig.createdAt
-        })
-        onConfigSaved(serializedConfig)
-      }
-      
       toast.success('Configuration saved successfully!')
     } catch (err) {
       console.error('Save config error:', err)
       toast.error(err.message || 'Failed to save configuration')
     }
   }
-const handleSetActive = async (configId) => {
+
+  const handleSetActive = async (configId) => {
     try {
       const updatedConfig = await bucketConfigService.setActive(configId)
       setActiveConfig(updatedConfig)
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
-      toast.success('Configuration activated!')
       
-// Notify Apper about the active config change with enhanced safe postMessage
-      if (window.parent && window.parent.postMessage) {
-        const serializedConfig = serializeForApper({
-          type: 'S3_CONFIG_ACTIVATED',
-          config: {
-            id: String(updatedConfig.id || updatedConfig.Id || ''),
-            name: String(updatedConfig.name || ''),
-            bucketName: String(updatedConfig.bucketName || ''),
-            region: String(updatedConfig.region || ''),
-            isActive: Boolean(updatedConfig.isActive),
-            activatedAt: Date.now()
-          }
-        });
-        
-        // Use the enhanced safePostMessage function
-        const success = safePostMessage(window.parent, serializedConfig, '*');
-        
-        if (!success) {
-          console.warn('Failed to notify Apper about config activation, sending minimal fallback');
-          // Send guaranteed safe fallback notification
-          const fallbackData = {
-            type: 'S3_CONFIG_ACTIVATED_ERROR',
-            error: 'notification_failed',
-            configId: String(updatedConfig.id || updatedConfig.Id || 'unknown'),
-            timestamp: Date.now()
-          };
-          
-          try {
-            window.parent.postMessage(fallbackData, '*');
-          } catch (fallbackError) {
-            console.error('Even minimal fallback notification failed:', fallbackError);
-          }
-        }
+      notifyParent({
+        type: 'config_activated',
+        status: 'success',
+        message: 'Configuration activated'
+      })
+      
+      if (onConfigSaved) {
+        onConfigSaved({
+          Id: updatedConfig.Id,
+          name: updatedConfig.name,
+          bucketName: updatedConfig.bucketName,
+          region: updatedConfig.region,
+          isActive: updatedConfig.isActive
+        })
       }
       
-      // Serialize config data to prevent DataCloneError
-      const serializedConfig = serializeForApper({
-        Id: updatedConfig.Id,
-        name: updatedConfig.name,
-        bucketName: updatedConfig.bucketName,
-        region: updatedConfig.region,
-        isActive: updatedConfig.isActive,
-        activatedAt: new Date().toISOString()
-      })
-      onConfigSaved?.(serializedConfig)
+      toast.success('Configuration activated!')
     } catch (err) {
       console.error('Configuration activation error:', err)
       toast.error(err.message || 'Failed to activate configuration')
     }
   }
-const handleDeleteConfig = async (configId) => {
+
+  const handleDeleteConfig = async (configId) => {
     if (!window.confirm('Are you sure you want to delete this configuration?')) return
     
     try {
@@ -499,38 +202,11 @@ const handleDeleteConfig = async (configId) => {
         setActiveConfig(null)
       }
       
-// Send notification to Apper if available with enhanced error handling
-      if (window.Apper) {
-        try {
-          const serializedConfig = serializeForApper({
-            type: 'config_deleted',
-            configId: String(configId || ''),
-            timestamp: Date.now()
-          });
-          
-          // Enhanced validation
-          if (!validateSerializedData(serializedConfig)) {
-            throw new Error('Data validation failed - contains non-serializable content');
-          }
-          
-          window.Apper.sendNotification(serializedConfig);
-        } catch (error) {
-          console.error('Failed to send Apper deletion notification:', error);
-          
-          // Guaranteed safe fallback notification
-          try {
-            const fallbackData = {
-              type: 'config_deleted',
-              configId: String(configId || 'unknown'),
-              timestamp: Date.now()
-            };
-            
-            window.Apper.sendNotification(fallbackData);
-          } catch (fallbackError) {
-            console.error('Even fallback Apper deletion notification failed:', fallbackError);
-          }
-        }
-      }
+      notifyParent({
+        type: 'config_deleted',
+        status: 'success',
+        message: 'Configuration deleted'
+      })
       
       toast.success('Configuration deleted!')
     } catch (err) {
@@ -606,7 +282,7 @@ const handleDeleteConfig = async (configId) => {
                 error={formErrors.accessKey}
                 placeholder="AKIAIOSFODNN7EXAMPLE"
                 required
-/>
+              />
               
               <Input
                 label="Secret Key"
@@ -632,7 +308,7 @@ const handleDeleteConfig = async (configId) => {
               <Input
                 label="Bucket Name"
                 value={formData.bucketName}
-onChange={(e) => handleInputChange('bucketName', e.target.value)}
+                onChange={(e) => handleInputChange('bucketName', e.target.value)}
                 error={formErrors.bucketName}
                 placeholder="my-s3-bucket"
                 required
@@ -718,7 +394,7 @@ onChange={(e) => handleInputChange('bucketName', e.target.value)}
             ))}
           </div>
         </motion.div>
-)}
+      )}
     </div>
   )
 }

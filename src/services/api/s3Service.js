@@ -90,13 +90,12 @@ class S3Service {
     }
   }
 
-  async uploadFile(file, path = '', progressCallback) {
+async uploadFile(file, path = '', progressCallback) {
     try {
       await this.ensureClient()
       
       const key = path ? `${path}/${file.name}` : file.name
       const startTime = Date.now()
-      let lastLoaded = 0
       
       const upload = new Upload({
         client: this.s3Client,
@@ -104,7 +103,7 @@ class S3Service {
           Bucket: this.bucketName,
           Key: key,
           Body: file,
-          ContentType: file.type
+          ContentType: file.type || 'application/octet-stream'
         }
       })
 
@@ -114,18 +113,20 @@ class S3Service {
           const total = progress.total || file.size
           const percentage = (loaded / total) * 100
           
-          // Calculate speed
           const elapsed = (Date.now() - startTime) / 1000
-          const bytesPerSecond = elapsed > 0 ? (loaded - lastLoaded) / elapsed : 0
-          const mbPerSecond = bytesPerSecond / (1024 * 1024)
+          const mbPerSecond = elapsed > 0 ? (loaded / (1024 * 1024)) / elapsed : 0
           
-          lastLoaded = loaded
           progressCallback(percentage, mbPerSecond)
         }
       })
 
-      await upload.done()
-      return { key, size: file.size, type: file.type }
+      const result = await upload.done()
+      return { 
+        key: key, 
+        size: file.size, 
+        type: file.type || 'application/octet-stream',
+        etag: result.ETag
+      }
     } catch (error) {
       throw new Error(`Failed to upload file: ${error.message}`)
     }

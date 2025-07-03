@@ -7,7 +7,7 @@ import FileUploader from "@/components/organisms/FileUploader";
 import FileBrowser from "@/components/organisms/FileBrowser";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
-const S3ManagerPage = () => {
+const S3Manager = () => {
   const [activeConfig, setActiveConfig] = useState(null)
   const [currentPath, setCurrentPath] = useState('')
   const [activeTab, setActiveTab] = useState('browser')
@@ -41,7 +41,7 @@ const S3ManagerPage = () => {
 const handleUploadComplete = () => {
     // Refresh file browser if it's the active tab
     if (activeTab === 'browser') {
-      window.dispatchEvent(new CustomEvent('refreshFiles'))
+      window.dispatchEvent(new window.CustomEvent('refreshFiles'))
     }
     // Force a reload of the active config to ensure consistency
     loadActiveConfig()
@@ -205,4 +205,4 @@ const handleUploadComplete = () => {
   )
 }
 
-export default S3ManagerPage
+export default S3Manager

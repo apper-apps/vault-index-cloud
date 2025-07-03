@@ -45,7 +45,7 @@ class BucketConfigService {
     return active ? { ...active } : null
   }
 
-  async create(configData) {
+async create(configData) {
     await new Promise(resolve => setTimeout(resolve, 400))
     
     // Deactivate all other configs
@@ -54,12 +54,17 @@ class BucketConfigService {
     const newConfig = {
       Id: Math.max(...this.configs.map(c => c.Id), 0) + 1,
       ...configData,
-      isActive: true
+      isActive: true,
+      createdAt: new Date().toISOString()
     }
     
     this.configs.push(newConfig)
     this.saveToLocalStorage()
     return { ...newConfig }
+  }
+
+  async save(configData) {
+    return this.create(configData)
   }
 
   async update(id, configData) {

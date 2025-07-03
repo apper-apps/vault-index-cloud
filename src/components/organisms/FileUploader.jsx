@@ -4,160 +4,22 @@ import { toast } from "react-toastify";
 import ApperIcon from "@/components/ApperIcon";
 import ProgressBar from "@/components/atoms/ProgressBar";
 import Button from "@/components/atoms/Button";
-import Error from "@/components/ui/Error";
 import s3Service from "@/services/api/s3Service";
-// Comprehensive serialization function for safe postMessage communication
-function serializeForPostMessage(data, visited = new WeakSet()) {
-  try {
-    // Handle null/undefined/primitives first
-    if (data === null || data === undefined) return data;
-    
-    // Handle primitives - exclude problematic types
-    if (typeof data !== 'object') {
-      if (typeof data === 'function' || typeof data === 'symbol' || typeof data === 'undefined') {
-        return null; // Return null instead of string representation
-      }
-      // Handle bigint
-      if (typeof data === 'bigint') {
-        return data.toString();
-      }
-      return data;
-    }
-    
-    // Handle circular references
-    if (visited.has(data)) {
-      return null; // Return null instead of string to avoid cloning issues
-    }
-    visited.add(data);
-    
-    // Handle Date objects first (before general object checking)
-    if (data instanceof Date) {
-      return data.toISOString();
-    }
-    
-    // Comprehensive detection of all non-cloneable Web API objects and DOM elements
-    if (
-      // Core Web API objects
-      (typeof Request !== 'undefined' && data instanceof Request) || 
-      (typeof Response !== 'undefined' && data instanceof Response) || 
-      (typeof FormData !== 'undefined' && data instanceof FormData) || 
-      (typeof File !== 'undefined' && data instanceof File) || 
-      (typeof Blob !== 'undefined' && data instanceof Blob) || 
-      (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) ||
-      (typeof SharedArrayBuffer !== 'undefined' && data instanceof SharedArrayBuffer) ||
-      
-      // DOM elements and nodes
-      (typeof Element !== 'undefined' && data instanceof Element) || 
-      (typeof Node !== 'undefined' && data instanceof Node) ||
-      (typeof HTMLElement !== 'undefined' && data instanceof HTMLElement) ||
-      (typeof SVGElement !== 'undefined' && data instanceof SVGElement) ||
-      data.nodeType !== undefined || // Any DOM node
-      data.window !== undefined || // Window objects
-      
-      // Other problematic types
-      data instanceof Error || data instanceof RegExp ||
-      data instanceof Map || data instanceof Set ||
-      data instanceof Promise || data instanceof WeakMap ||
-      data instanceof WeakSet || 
-      typeof data.then === 'function' || // Promises and thenables
-      
-      // Stream objects
-      (typeof ReadableStream !== 'undefined' && data instanceof ReadableStream) ||
-      (typeof WritableStream !== 'undefined' && data instanceof WritableStream) ||
-      (typeof TransformStream !== 'undefined' && data instanceof TransformStream) ||
-      
-      // Constructor name pattern matching for safety
-      data.constructor?.name?.includes('Request') ||
-      data.constructor?.name?.includes('Response') ||
-      data.constructor?.name?.includes('Element') ||
-      data.constructor?.name?.includes('HTML') ||
-      data.constructor?.name?.includes('SVG') ||
-      data.constructor?.name?.includes('Stream') ||
-      data.constructor?.name?.includes('Buffer') ||
-      
-      // Event objects
-      (typeof Event !== 'undefined' && data instanceof Event) ||
-      data.constructor?.name?.includes('Event')
-    ) {
-      return null; // Return null to completely avoid serialization
-    }
-    
-    // Handle Arrays
-    if (Array.isArray(data)) {
-      const cleaned = data.map(item => serializeForPostMessage(item, visited))
-                        .filter(item => item !== null && item !== undefined);
-      visited.delete(data);
-      return cleaned;
-    }
-    
-    // Handle plain objects - only process enumerable own properties
-    const result = {};
-    
-    try {
-      // Use Object.entries for better safety
-      for (const [key, value] of Object.entries(data)) {
-        // Skip non-string keys
-        if (typeof key !== 'string') continue;
-        
-        const serializedValue = serializeForPostMessage(value, visited);
-        if (serializedValue !== null && serializedValue !== undefined) {
-          result[key] = serializedValue;
-        }
-      }
-    } catch (error) {
-      console.warn('Error during object serialization:', error);
-      visited.delete(data);
-      return null;
-    }
-    
-    visited.delete(data);
-    return result;
-  } catch (error) {
-    console.error('Critical serialization error:', error);
-    return null; // Return null instead of error object
-  }
-}
 
-// Enhanced safe postMessage wrapper with comprehensive error handling
-function safePostMessage(targetWindow, data, targetOrigin = '*') {
-  try {
-    // First serialize the data
-    const serializedData = serializeForPostMessage(data);
-    
-    // Validate serialized data
-    if (serializedData === null || serializedData === undefined) {
-      console.warn('Data serialization resulted in null/undefined, skipping postMessage');
-      return false;
+// Simple notification helper
+function notifyParent(data) {
+  if (window.parent && window.parent.postMessage) {
+    try {
+      const safeData = {
+        type: typeof data.type === 'string' ? data.type : 'upload',
+        status: typeof data.status === 'string' ? data.status : 'info',
+        message: typeof data.message === 'string' ? data.message : '',
+        timestamp: Date.now()
+      };
+      window.parent.postMessage(safeData, '*');
+    } catch (error) {
+      console.warn('Failed to notify parent:', error);
     }
-    
-    // Test JSON serialization as final validation
-    const testSerialization = JSON.stringify(serializedData);
-    if (testSerialization === undefined) {
-      console.warn('Final JSON serialization failed, skipping postMessage');
-      return false;
-    }
-    
-    targetWindow.postMessage(serializedData, targetOrigin);
-    return true;
-  } catch (error) {
-    console.error('SafePostMessage failed:', error);
-    
-    // Handle specific DataCloneError
-    if (error.name === 'DataCloneError' || error.message.includes('DataCloneError')) {
-      console.error('DataCloneError detected - attempting minimal fallback');
-      try {
-        // Send minimal error notification
-        targetWindow.postMessage({
-          type: 'SERIALIZATION_ERROR',
-          error: 'DataCloneError',
-          timestamp: Date.now()
-        }, targetOrigin);
-      } catch (fallbackError) {
-        console.error('Even minimal fallback failed:', fallbackError);
-      }
-    }
-    
-    return false;
   }
 }
 
@@ -192,16 +54,15 @@ const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) =>
     if (files.length > 0) {
       handleFileUpload(files)
     }
-    e.target.value = '' // Reset input
+    e.target.value = ''
   }
 
-const handleFileUpload = async (files) => {
+  const handleFileUpload = async (files) => {
     if (files.length === 0) return
 
     try {
       setIsUploading(true)
       
-      // Use actual S3 service for uploads with progress tracking
       const uploadPromises = files.map(async (file) => {
         const taskId = Math.random().toString(36).substr(2, 9)
         const task = {
@@ -232,14 +93,10 @@ const handleFileUpload = async (files) => {
           
           toast.success(`Successfully uploaded ${file.name}`)
 
-          // Notify parent window about upload completion
-          await notifyParent({
-            type: 'FILE_UPLOAD_COMPLETE',
-            fileName: file.name,
-            fileSize: file.size,
-            fileType: file.type,
-            path: currentPath,
-            timestamp: new Date().toISOString()
+          notifyParent({
+            type: 'file_upload_complete',
+            status: 'success',
+            message: `Uploaded ${file.name}`
           })
 
         } catch (error) {
@@ -251,13 +108,10 @@ const handleFileUpload = async (files) => {
           
           toast.error(`Failed to upload ${file.name}: ${error.message}`)
 
-          // Notify parent about upload failure
-          await notifyParent({
-            type: 'FILE_UPLOAD_FAILED',
-            fileName: file.name,
-            error: error.message,
-            path: currentPath,
-            timestamp: new Date().toISOString()
+          notifyParent({
+            type: 'file_upload_failed',
+            status: 'error',
+            message: `Failed to upload ${file.name}`
           })
         }
 
@@ -266,7 +120,6 @@ const handleFileUpload = async (files) => {
 
       await Promise.all(uploadPromises)
 
-      // Clear completed tasks after a delay
       setTimeout(() => {
         setUploadTasks(prev => prev.filter(task => task.status === 'error'))
         onUploadComplete?.()
@@ -277,65 +130,6 @@ const handleFileUpload = async (files) => {
       toast.error(`Upload failed: ${err.message}`)
     } finally {
       setIsUploading(false)
-    }
-  }
-
-const notifyParent = async (data) => {
-    if (!window.parent || !window.parent.postMessage) return;
-
-    try {
-      // Use enhanced safePostMessage with comprehensive serialization
-      if (window.parent && window.parent.postMessage) {
-        const success = safePostMessage(window.parent, data, '*');
-        
-        if (success) {
-          console.log('File upload notification sent successfully');
-          return;
-        } else {
-          console.warn('Primary notification failed, attempting fallback');
-          
-          // Fallback to global safe functions if available
-          if (window.safePostMessage) {
-            const fallbackSuccess = window.safePostMessage(window.parent, data, '*');
-            if (fallbackSuccess) {
-              console.log('File upload notification sent via global safePostMessage');
-              return;
-            }
-          }
-          
-          // Last resort: send minimal safe data
-          const safeData = {
-            type: 'file_upload_complete',
-            success: true,
-            timestamp: Date.now(),
-            message: 'File upload completed - detailed data could not be serialized'
-          };
-          
-          try {
-            window.parent.postMessage(safeData, '*');
-            console.warn('Sent minimal file upload notification due to serialization issues');
-          } catch (minimalError) {
-            console.error('Even minimal notification failed:', minimalError);
-          }
-        }
-      } else {
-        console.warn('Parent window not available for file upload notification');
-      }
-    } catch (error) {
-      console.error('Failed to send file upload notification:', error);
-      
-      // Final fallback
-      try {
-        if (window.parent && window.parent.postMessage) {
-          window.parent.postMessage({
-            type: 'file_upload_error',
-            error: 'Notification failed',
-            timestamp: Date.now()
-          }, '*');
-        }
-      } catch (finalError) {
-        console.error('Even fallback notification failed:', finalError);
-      }
     }
   }
 
@@ -366,14 +160,10 @@ const notifyParent = async (data) => {
       
       toast.success(`Successfully uploaded ${task.file.name}`)
 
-      // Notify parent about successful retry
-      await notifyParent({
-        type: 'FILE_UPLOAD_COMPLETE',
-        fileName: task.file.name,
-        fileSize: task.file.size,
-        fileType: task.file.type,
-        path: currentPath,
-        timestamp: new Date().toISOString()
+      notifyParent({
+        type: 'file_upload_complete',
+        status: 'success',
+        message: `Uploaded ${task.file.name}`
       })
 
     } catch (error) {
@@ -404,7 +194,6 @@ const notifyParent = async (data) => {
 
   return (
     <div className={`space-y-6 ${className}`}>
-      {/* Upload Zone */}
       <motion.div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -459,7 +248,6 @@ const notifyParent = async (data) => {
         />
       </motion.div>
 
-      {/* Upload Progress */}
       <AnimatePresence>
         {uploadTasks.length > 0 && (
           <motion.div
