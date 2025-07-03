@@ -1,10 +1,10 @@
-import { useState, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { toast } from 'react-toastify'
-import Button from '@/components/atoms/Button'
-import ProgressBar from '@/components/atoms/ProgressBar'
-import s3Service from '@/services/api/s3Service'
-import ApperIcon from '@/components/ApperIcon'
+import React, { useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "react-toastify";
+import ApperIcon from "@/components/ApperIcon";
+import ProgressBar from "@/components/atoms/ProgressBar";
+import Button from "@/components/atoms/Button";
+import s3Service from "@/services/api/s3Service";
 
 const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) => {
   const [isDragOver, setIsDragOver] = useState(false)
@@ -49,9 +49,19 @@ const handleFileUpload = async (files) => {
       // Use actual S3 service for uploads with progress tracking
       const uploadPromises = files.map(async (file) => {
         const taskId = Math.random().toString(36).substr(2, 9)
-        const task = {
+        
+        // Create serializable file metadata to prevent DataCloneError
+        const fileMetadata = {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          lastModified: file.lastModified
+        }
+        
+const task = {
           id: taskId,
-          file: file,
+          file: fileMetadata, // Use serializable metadata instead of File object
+          originalFile: file, // Store original file for retry functionality
           progress: 0,
           status: 'uploading',
           speed: 0,
@@ -111,7 +121,10 @@ const handleFileUpload = async (files) => {
 
 const retryTask = async (taskId) => {
     const task = uploadTasks.find(t => t.id === taskId)
-    if (!task) return
+    if (!task || !task.originalFile) {
+      toast.error('Cannot retry: Original file not available')
+      return
+    }
 
     try {
       setUploadTasks(prev => prev.map(t => 
@@ -120,7 +133,7 @@ const retryTask = async (taskId) => {
           : t
       ))
 
-      await s3Service.uploadFile(task.file, currentPath, (progress, speed) => {
+      await s3Service.uploadFile(task.originalFile, currentPath, (progress, speed) => {
         setUploadTasks(prev => prev.map(t => 
           t.id === taskId 
             ? { ...t, progress: Math.round(progress), speed: speed || 0 }

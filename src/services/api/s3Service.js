@@ -1,6 +1,54 @@
-import { S3Client, ListObjectsV2Command, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
-import { Upload } from '@aws-sdk/lib-storage'
-import bucketConfigService from '@/services/api/bucketConfigService'
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+import React from "react";
+import Error from "@/components/ui/Error";
+import bucketConfigService from "@/services/api/bucketConfigService";
+
+// Utility function to ensure objects are serializable (prevent DataCloneError)
+const makeSerializable = (obj) => {
+  if (obj === null || obj === undefined) return obj
+  if (typeof obj !== 'object') return obj
+  
+  try {
+    return JSON.parse(JSON.stringify(obj))
+  } catch (error) {
+    console.warn('Object could not be serialized, creating safe copy:', error)
+    return {}
+  }
+}
+
+// Helper function to get file type from key
+const getFileType = (key) => {
+  const extension = key.split('.').pop().toLowerCase()
+  const mimeTypes = {
+    'pdf': 'application/pdf',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'mp4': 'video/mp4',
+    'mp3': 'audio/mpeg',
+    'zip': 'application/zip',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'txt': 'text/plain',
+    'csv': 'text/csv',
+    'json': 'application/json'
+  }
+  return mimeTypes[extension] || 'application/octet-stream'
+}
+
+// Safe file metadata extraction
+const extractFileMetadata = (s3Object, key) => {
+  return makeSerializable({
+    key: key || s3Object.Key || '',
+    name: (key || s3Object.Key || '').split('/').pop() || 'Unknown',
+    size: s3Object.Size || 0,
+    lastModified: s3Object.LastModified ? s3Object.LastModified.toISOString() : new Date().toISOString(),
+    etag: s3Object.ETag || '',
+    isFolder: (key || s3Object.Key || '').endsWith('/'),
+    type: getFileType(key || s3Object.Key || '')
+  })
+}
 
 class S3Service {
   constructor() {
@@ -163,8 +211,7 @@ class S3Service {
       throw new Error(`Failed to download file: ${error.message}`)
     }
   }
-
-  async deleteFile(fileKey) {
+async deleteFile(fileKey) {
     try {
       await this.ensureClient()
       
@@ -173,10 +220,15 @@ class S3Service {
         Key: fileKey
       })
 
-      await this.s3Client.send(command)
-      return true
+      const result = await this.s3Client.send(command)
+      return makeSerializable({ success: true, key: fileKey, result })
     } catch (error) {
-      throw new Error(`Failed to delete file: ${error.message}`)
+      const serializedError = makeSerializable({
+        message: error.message,
+        code: error.code || 'UNKNOWN_ERROR',
+        statusCode: error.$metadata?.httpStatusCode
+      })
+      throw new Error(`Failed to delete file: ${serializedError.message}`)
     }
   }
 

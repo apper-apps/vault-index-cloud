@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { CopyToClipboard } from "react-copy-to-clipboard";
 import { Document, Page, pdfjs } from "react-pdf";
 import ApperIcon from "@/components/ApperIcon";
+import Input from "@/components/atoms/Input";
 import Button from "@/components/atoms/Button";
 import SearchBar from "@/components/molecules/SearchBar";
 import FileTypeIcon from "@/components/molecules/FileTypeIcon";
@@ -21,7 +22,7 @@ const FileBrowser = ({ currentPath = '', onPathChange, onRefresh, className = ""
   const [filteredFiles, setFilteredFiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-const [selectedFiles, setSelectedFiles] = useState(new Set())
+  const [selectedFiles, setSelectedFiles] = useState(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
@@ -29,6 +30,17 @@ const [selectedFiles, setSelectedFiles] = useState(new Set())
   const [showPreview, setShowPreview] = useState(false)
   const [shareModalFile, setShareModalFile] = useState(null)
   const [showShareModal, setShowShareModal] = useState(false)
+
+  // Handler functions for preview and share
+  const handlePreview = (file) => {
+    setPreviewFile(file)
+    setShowPreview(true)
+  }
+
+  const handleShare = (file) => {
+    setShareModalFile(file)
+    setShowShareModal(true)
+  }
   useEffect(() => {
     loadFiles()
   }, [currentPath])
@@ -208,28 +220,30 @@ const [selectedFiles, setSelectedFiles] = useState(new Set())
     return format(new Date(dateString), 'MMM dd, yyyy HH:mm')
   }
 
-  const getBreadcrumbs = () => {
+const getBreadcrumbs = () => {
     if (!currentPath) return []
     
-    const parts = currentPath.split('/')
-    return parts.map((part, index) => ({
-      name: part,
-      path: parts.slice(0, index + 1).join('/')
-    }))
+    const parts = currentPath.split('/').filter(Boolean)
+    let path = ''
+    
+    return parts.map((part, index) => {
+      path += (index > 0 ? '/' : '') + part
+      return {
+        name: part,
+        path: path
+      }
+    })
   }
 
   if (loading) return <Loading type="files" />
-  if (error) return <Error message={error} onRetry={loadFiles} type="file" />
+  if (error) return <Error message={error} onRetry={loadFiles} />
 
   return (
     <div className={`space-y-6 ${className}`}>
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">File Browser</h2>
-          
-          {/* Breadcrumbs */}
-          <nav className="flex items-center space-x-2 text-sm text-gray-600 mt-2">
+      {/* Breadcrumbs */}
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <nav className="flex items-center space-x-2 text-sm">
             <button
               onClick={() => onPathChange?.('')}
               className="hover:text-aws-blue transition-colors"
@@ -533,11 +547,13 @@ const [selectedFiles, setSelectedFiles] = useState(new Set())
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+</AnimatePresence>
     </div>
   )
+}
 
-  // Handler functions for preview and share
+// Handler functions for preview and share - moved inside component scope
+const useFileHandlers = (setPreviewFile, setShowPreview, setShareModalFile, setShowShareModal) => {
   const handlePreview = (file) => {
     setPreviewFile(file)
     setShowPreview(true)
@@ -547,6 +563,8 @@ const [selectedFiles, setSelectedFiles] = useState(new Set())
     setShareModalFile(file)
     setShowShareModal(true)
   }
+
+  return { handlePreview, handleShare }
 }
 
 // File Preview Component

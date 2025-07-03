@@ -82,11 +82,21 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
     }
   }
 
-  const handleSaveConfig = async () => {
+const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
       const savedConfig = await bucketConfigService.create(formData)
+      
+      // Ensure config is serializable for postMessage compatibility
+      const serializableConfig = {
+        Id: savedConfig.Id,
+        name: savedConfig.name,
+        bucketName: savedConfig.bucketName,
+        region: savedConfig.region,
+        isActive: savedConfig.isActive
+      }
+      
       setConfigs(prev => [...prev, savedConfig])
       setActiveConfig(savedConfig)
       setFormData({
@@ -98,21 +108,31 @@ const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
       })
       setShowForm(false)
       toast.success('Configuration saved successfully!')
-      onConfigSaved?.(savedConfig)
+      onConfigSaved?.(serializableConfig)
     } catch (err) {
-      toast.error(err.message)
+      toast.error(err?.message || 'Failed to save configuration')
     }
   }
 
-  const handleSetActive = async (configId) => {
+const handleSetActive = async (configId) => {
     try {
       const updatedConfig = await bucketConfigService.setActive(configId)
+      
+      // Create serializable version for postMessage
+      const serializableConfig = {
+        Id: updatedConfig.Id,
+        name: updatedConfig.name,
+        bucketName: updatedConfig.bucketName,
+        region: updatedConfig.region,
+        isActive: updatedConfig.isActive
+      }
+      
       setActiveConfig(updatedConfig)
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
       toast.success('Configuration activated!')
-      onConfigSaved?.(updatedConfig)
+      onConfigSaved?.(serializableConfig)
     } catch (err) {
-      toast.error(err.message)
+      toast.error(err?.message || 'Failed to activate configuration')
     }
   }
 
