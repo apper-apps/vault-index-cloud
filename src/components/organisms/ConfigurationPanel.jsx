@@ -38,30 +38,50 @@ function serializeForApper(obj, visited = new WeakSet()) {
       return obj.toISOString();
     }
     
-// Handle all non-cloneable Web API objects and DOM elements comprehensively
-    if ((typeof Request !== 'undefined' && obj instanceof Request) || 
-        (typeof Response !== 'undefined' && obj instanceof Response) || 
-        (typeof FormData !== 'undefined' && obj instanceof FormData) || 
-        (typeof File !== 'undefined' && obj instanceof File) || 
-        (typeof Blob !== 'undefined' && obj instanceof Blob) || 
-        (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) ||
-        (typeof Element !== 'undefined' && obj instanceof Element) || 
-        (typeof Node !== 'undefined' && obj instanceof Node) ||
-        obj instanceof Error || obj instanceof RegExp ||
-        obj instanceof Map || obj instanceof Set ||
-        obj instanceof Promise || obj instanceof WeakMap ||
-        obj instanceof WeakSet || 
-        (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
-        obj.constructor?.name?.includes('Request') ||
-        obj.constructor?.name?.includes('Response') ||
-        obj.constructor?.name?.includes('Element') ||
-        obj.constructor?.name?.includes('HTML') ||
-        obj.constructor?.name?.includes('SVG') ||
-        obj.nodeType !== undefined || // DOM nodes
-        obj.window !== undefined || // Window objects
-        typeof obj.then === 'function' || // Promises and thenables
-        obj.constructor?.name?.includes('Stream') // Streams
-      ) {
+// Comprehensive detection of all non-cloneable Web API objects and DOM elements
+    if (
+      // Core Web API objects
+      (typeof Request !== 'undefined' && Request && obj instanceof Request) || 
+      (typeof Response !== 'undefined' && Response && obj instanceof Response) || 
+      (typeof FormData !== 'undefined' && FormData && obj instanceof FormData) || 
+      (typeof File !== 'undefined' && File && obj instanceof File) || 
+      (typeof Blob !== 'undefined' && Blob && obj instanceof Blob) || 
+      (typeof ArrayBuffer !== 'undefined' && ArrayBuffer && obj instanceof ArrayBuffer) ||
+      (typeof SharedArrayBuffer !== 'undefined' && SharedArrayBuffer && obj instanceof SharedArrayBuffer) ||
+      
+      // DOM elements and nodes
+      (typeof Element !== 'undefined' && Element && obj instanceof Element) || 
+      (typeof Node !== 'undefined' && Node && obj instanceof Node) ||
+      (typeof HTMLElement !== 'undefined' && HTMLElement && obj instanceof HTMLElement) ||
+      (typeof SVGElement !== 'undefined' && SVGElement && obj instanceof SVGElement) ||
+      obj.nodeType !== undefined || // Any DOM node
+      obj.window !== undefined || // Window objects
+      
+      // Other problematic types
+      obj instanceof Error || obj instanceof RegExp ||
+      obj instanceof Map || obj instanceof Set ||
+      obj instanceof Promise || obj instanceof WeakMap ||
+      obj instanceof WeakSet || 
+      typeof obj.then === 'function' || // Promises and thenables
+      
+      // Stream objects
+      (typeof ReadableStream !== 'undefined' && ReadableStream && obj instanceof ReadableStream) ||
+      (typeof WritableStream !== 'undefined' && WritableStream && obj instanceof WritableStream) ||
+      (typeof TransformStream !== 'undefined' && TransformStream && obj instanceof TransformStream) ||
+      
+      // Constructor name pattern matching for safety
+      obj.constructor?.name?.includes('Request') ||
+      obj.constructor?.name?.includes('Response') ||
+      obj.constructor?.name?.includes('Element') ||
+      obj.constructor?.name?.includes('HTML') ||
+      obj.constructor?.name?.includes('SVG') ||
+      obj.constructor?.name?.includes('Stream') ||
+      obj.constructor?.name?.includes('Buffer') ||
+      
+      // Event objects
+      (typeof Event !== 'undefined' && Event && obj instanceof Event) ||
+      obj.constructor?.name?.includes('Event')
+    ) {
       return null; // Return null to completely avoid serialization
     }
     
@@ -125,14 +145,14 @@ function validateSerializedData(data) {
       }
       
 // Check for problematic object types
-      if ((typeof Request !== 'undefined' && obj instanceof Request) || 
-          (typeof Response !== 'undefined' && obj instanceof Response) || 
-          (typeof FormData !== 'undefined' && obj instanceof FormData) || 
-          (typeof File !== 'undefined' && obj instanceof File) || 
-          (typeof Blob !== 'undefined' && obj instanceof Blob) || 
+      if ((typeof Request !== 'undefined' && Request && obj instanceof Request) || 
+          (typeof Response !== 'undefined' && Response && obj instanceof Response) || 
+          (typeof FormData !== 'undefined' && FormData && obj instanceof FormData) || 
+          (typeof File !== 'undefined' && File && obj instanceof File) || 
+          (typeof Blob !== 'undefined' && Blob && obj instanceof Blob) || 
           obj instanceof Error ||
-          (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) || 
-          (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
+          (typeof ArrayBuffer !== 'undefined' && ArrayBuffer && obj instanceof ArrayBuffer) || 
+          (typeof SharedArrayBuffer !== 'undefined' && SharedArrayBuffer && obj instanceof SharedArrayBuffer) ||
           obj.constructor?.name?.includes('Request') ||
           obj.constructor?.name?.includes('Response') ||
           obj.constructor?.name?.includes('Stream') ||

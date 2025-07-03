@@ -4,7 +4,163 @@ import { toast } from "react-toastify";
 import ApperIcon from "@/components/ApperIcon";
 import ProgressBar from "@/components/atoms/ProgressBar";
 import Button from "@/components/atoms/Button";
+import Error from "@/components/ui/Error";
 import s3Service from "@/services/api/s3Service";
+// Comprehensive serialization function for safe postMessage communication
+function serializeForPostMessage(data, visited = new WeakSet()) {
+  try {
+    // Handle null/undefined/primitives first
+    if (data === null || data === undefined) return data;
+    
+    // Handle primitives - exclude problematic types
+    if (typeof data !== 'object') {
+      if (typeof data === 'function' || typeof data === 'symbol' || typeof data === 'undefined') {
+        return null; // Return null instead of string representation
+      }
+      // Handle bigint
+      if (typeof data === 'bigint') {
+        return data.toString();
+      }
+      return data;
+    }
+    
+    // Handle circular references
+    if (visited.has(data)) {
+      return null; // Return null instead of string to avoid cloning issues
+    }
+    visited.add(data);
+    
+    // Handle Date objects first (before general object checking)
+    if (data instanceof Date) {
+      return data.toISOString();
+    }
+    
+    // Comprehensive detection of all non-cloneable Web API objects and DOM elements
+    if (
+      // Core Web API objects
+      (typeof Request !== 'undefined' && data instanceof Request) || 
+      (typeof Response !== 'undefined' && data instanceof Response) || 
+      (typeof FormData !== 'undefined' && data instanceof FormData) || 
+      (typeof File !== 'undefined' && data instanceof File) || 
+      (typeof Blob !== 'undefined' && data instanceof Blob) || 
+      (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) ||
+      (typeof SharedArrayBuffer !== 'undefined' && data instanceof SharedArrayBuffer) ||
+      
+      // DOM elements and nodes
+      (typeof Element !== 'undefined' && data instanceof Element) || 
+      (typeof Node !== 'undefined' && data instanceof Node) ||
+      (typeof HTMLElement !== 'undefined' && data instanceof HTMLElement) ||
+      (typeof SVGElement !== 'undefined' && data instanceof SVGElement) ||
+      data.nodeType !== undefined || // Any DOM node
+      data.window !== undefined || // Window objects
+      
+      // Other problematic types
+      data instanceof Error || data instanceof RegExp ||
+      data instanceof Map || data instanceof Set ||
+      data instanceof Promise || data instanceof WeakMap ||
+      data instanceof WeakSet || 
+      typeof data.then === 'function' || // Promises and thenables
+      
+      // Stream objects
+      (typeof ReadableStream !== 'undefined' && data instanceof ReadableStream) ||
+      (typeof WritableStream !== 'undefined' && data instanceof WritableStream) ||
+      (typeof TransformStream !== 'undefined' && data instanceof TransformStream) ||
+      
+      // Constructor name pattern matching for safety
+      data.constructor?.name?.includes('Request') ||
+      data.constructor?.name?.includes('Response') ||
+      data.constructor?.name?.includes('Element') ||
+      data.constructor?.name?.includes('HTML') ||
+      data.constructor?.name?.includes('SVG') ||
+      data.constructor?.name?.includes('Stream') ||
+      data.constructor?.name?.includes('Buffer') ||
+      
+      // Event objects
+      (typeof Event !== 'undefined' && data instanceof Event) ||
+      data.constructor?.name?.includes('Event')
+    ) {
+      return null; // Return null to completely avoid serialization
+    }
+    
+    // Handle Arrays
+    if (Array.isArray(data)) {
+      const cleaned = data.map(item => serializeForPostMessage(item, visited))
+                        .filter(item => item !== null && item !== undefined);
+      visited.delete(data);
+      return cleaned;
+    }
+    
+    // Handle plain objects - only process enumerable own properties
+    const result = {};
+    
+    try {
+      // Use Object.entries for better safety
+      for (const [key, value] of Object.entries(data)) {
+        // Skip non-string keys
+        if (typeof key !== 'string') continue;
+        
+        const serializedValue = serializeForPostMessage(value, visited);
+        if (serializedValue !== null && serializedValue !== undefined) {
+          result[key] = serializedValue;
+        }
+      }
+    } catch (error) {
+      console.warn('Error during object serialization:', error);
+      visited.delete(data);
+      return null;
+    }
+    
+    visited.delete(data);
+    return result;
+  } catch (error) {
+    console.error('Critical serialization error:', error);
+    return null; // Return null instead of error object
+  }
+}
+
+// Enhanced safe postMessage wrapper with comprehensive error handling
+function safePostMessage(targetWindow, data, targetOrigin = '*') {
+  try {
+    // First serialize the data
+    const serializedData = serializeForPostMessage(data);
+    
+    // Validate serialized data
+    if (serializedData === null || serializedData === undefined) {
+      console.warn('Data serialization resulted in null/undefined, skipping postMessage');
+      return false;
+    }
+    
+    // Test JSON serialization as final validation
+    const testSerialization = JSON.stringify(serializedData);
+    if (testSerialization === undefined) {
+      console.warn('Final JSON serialization failed, skipping postMessage');
+      return false;
+    }
+    
+    targetWindow.postMessage(serializedData, targetOrigin);
+    return true;
+  } catch (error) {
+    console.error('SafePostMessage failed:', error);
+    
+    // Handle specific DataCloneError
+    if (error.name === 'DataCloneError' || error.message.includes('DataCloneError')) {
+      console.error('DataCloneError detected - attempting minimal fallback');
+      try {
+        // Send minimal error notification
+        targetWindow.postMessage({
+          type: 'SERIALIZATION_ERROR',
+          error: 'DataCloneError',
+          timestamp: Date.now()
+        }, targetOrigin);
+      } catch (fallbackError) {
+        console.error('Even minimal fallback failed:', fallbackError);
+      }
+    }
+    
+    return false;
+  }
+}
+
 const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) => {
   const [isDragOver, setIsDragOver] = useState(false)
   const [uploadTasks, setUploadTasks] = useState([])
@@ -124,35 +280,29 @@ const handleFileUpload = async (files) => {
     }
   }
 
-  const notifyParent = async (data) => {
-    if (!window.parent || !window.parent.postMessage) return
+const notifyParent = async (data) => {
+    if (!window.parent || !window.parent.postMessage) return;
 
     try {
-      // Use global safePostMessage if available
-try {
-        // First try to use global safe functions if available
-        if (window.safePostMessage && window.parent) {
-          const success = window.safePostMessage(window.parent, data, '*');
-          if (success) {
-            console.log('File upload notification sent via safePostMessage');
-            return;
-          }
-        }
+      // Use enhanced safePostMessage with comprehensive serialization
+      if (window.parent && window.parent.postMessage) {
+        const success = safePostMessage(window.parent, data, '*');
         
-        // Fallback to manual serialization
-        if (window.safeSerialize && window.parent && window.parent.postMessage) {
-          const serializedData = window.safeSerialize(data);
+        if (success) {
+          console.log('File upload notification sent successfully');
+          return;
+        } else {
+          console.warn('Primary notification failed, attempting fallback');
           
-          // Validate serialization worked
-          try {
-            JSON.stringify(serializedData);
-            window.parent.postMessage(serializedData, '*');
-            console.log('File upload notification sent via manual serialization');
-          } catch (validationError) {
-            console.warn('Serialization validation failed:', validationError);
-            throw validationError;
+          // Fallback to global safe functions if available
+          if (window.safePostMessage) {
+            const fallbackSuccess = window.safePostMessage(window.parent, data, '*');
+            if (fallbackSuccess) {
+              console.log('File upload notification sent via global safePostMessage');
+              return;
+            }
           }
-        } else if (window.parent && window.parent.postMessage) {
+          
           // Last resort: send minimal safe data
           const safeData = {
             type: 'file_upload_complete',
@@ -160,42 +310,31 @@ try {
             timestamp: Date.now(),
             message: 'File upload completed - detailed data could not be serialized'
           };
-          window.parent.postMessage(safeData, '*');
-          console.warn('Sent minimal file upload notification due to serialization issues');
-        } else {
-          console.warn('Parent window not available for file upload notification');
-        }
-      } catch (error) {
-        console.error('Failed to send file upload notification:', error);
-        
-        // Final fallback
-        try {
-          if (window.parent && window.parent.postMessage) {
-            window.parent.postMessage({
-              type: 'file_upload_error',
-              error: 'Notification failed',
-              timestamp: Date.now()
-            }, '*');
+          
+          try {
+            window.parent.postMessage(safeData, '*');
+            console.warn('Sent minimal file upload notification due to serialization issues');
+          } catch (minimalError) {
+            console.error('Even minimal notification failed:', minimalError);
           }
-        } catch (finalError) {
-          console.error('Even fallback notification failed:', finalError);
         }
+      } else {
+        console.warn('Parent window not available for file upload notification');
       }
-    } catch (postError) {
-      console.warn('Failed to notify parent:', postError)
-      if (postError.name === 'DataCloneError') {
-        console.error('DataCloneError: Notification data contains non-cloneable objects')
-        // Send minimal fallback notification
-        try {
+    } catch (error) {
+      console.error('Failed to send file upload notification:', error);
+      
+      // Final fallback
+      try {
+        if (window.parent && window.parent.postMessage) {
           window.parent.postMessage({
-            type: 'NOTIFICATION_ERROR',
-            error: 'Notification failed due to data serialization',
-            fileName: data.fileName || 'unknown',
+            type: 'file_upload_error',
+            error: 'Notification failed',
             timestamp: Date.now()
-          }, '*')
-        } catch (fallbackError) {
-          console.error('Even fallback notification failed:', fallbackError)
+          }, '*');
         }
+      } catch (finalError) {
+        console.error('Even fallback notification failed:', finalError);
       }
     }
   }

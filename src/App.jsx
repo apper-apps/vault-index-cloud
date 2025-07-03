@@ -33,25 +33,50 @@ function safeSerialize(data, visited = new WeakSet()) {
       return data.toISOString();
     }
     
-    // Handle all non-cloneable Web API objects comprehensively
-    if (data instanceof Request || data instanceof Response || 
-        data instanceof FormData || data instanceof File || 
-        data instanceof Blob || data instanceof ArrayBuffer ||
-        data instanceof Element || data instanceof Node ||
-        data instanceof Error || data instanceof RegExp ||
-        data instanceof Map || data instanceof Set ||
-        data instanceof Promise || data instanceof WeakMap ||
-        data instanceof WeakSet || data instanceof SharedArrayBuffer ||
-        data.constructor?.name?.includes('Request') ||
-        data.constructor?.name?.includes('Response') ||
-        data.constructor?.name?.includes('Element') ||
-        data.constructor?.name?.includes('HTML') ||
-        data.constructor?.name?.includes('SVG') ||
-        data.nodeType !== undefined || // DOM nodes
-        data.window !== undefined || // Window objects
-        typeof data.then === 'function' || // Promises and thenables
-        data.constructor?.name?.includes('Stream') // Streams
-      ) {
+    // Comprehensive detection of all non-cloneable Web API objects and DOM elements
+    if (
+      // Core Web API objects
+      (typeof Request !== 'undefined' && data instanceof Request) || 
+      (typeof Response !== 'undefined' && data instanceof Response) || 
+      (typeof FormData !== 'undefined' && data instanceof FormData) || 
+      (typeof File !== 'undefined' && data instanceof File) || 
+      (typeof Blob !== 'undefined' && data instanceof Blob) || 
+      (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer) ||
+      (typeof SharedArrayBuffer !== 'undefined' && data instanceof SharedArrayBuffer) ||
+      
+      // DOM elements and nodes
+      (typeof Element !== 'undefined' && data instanceof Element) || 
+      (typeof Node !== 'undefined' && data instanceof Node) ||
+      (typeof HTMLElement !== 'undefined' && data instanceof HTMLElement) ||
+      (typeof SVGElement !== 'undefined' && data instanceof SVGElement) ||
+      data.nodeType !== undefined || // Any DOM node
+      data.window !== undefined || // Window objects
+      
+      // Other problematic types
+      data instanceof Error || data instanceof RegExp ||
+      data instanceof Map || data instanceof Set ||
+      data instanceof Promise || data instanceof WeakMap ||
+      data instanceof WeakSet || 
+      typeof data.then === 'function' || // Promises and thenables
+      
+      // Stream objects
+      (typeof ReadableStream !== 'undefined' && data instanceof ReadableStream) ||
+      (typeof WritableStream !== 'undefined' && data instanceof WritableStream) ||
+      (typeof TransformStream !== 'undefined' && data instanceof TransformStream) ||
+      
+      // Constructor name pattern matching for safety
+      data.constructor?.name?.includes('Request') ||
+      data.constructor?.name?.includes('Response') ||
+      data.constructor?.name?.includes('Element') ||
+      data.constructor?.name?.includes('HTML') ||
+      data.constructor?.name?.includes('SVG') ||
+      data.constructor?.name?.includes('Stream') ||
+      data.constructor?.name?.includes('Buffer') ||
+      
+      // Event objects
+      (typeof Event !== 'undefined' && data instanceof Event) ||
+      data.constructor?.name?.includes('Event')
+    ) {
       return null; // Return null to completely avoid serialization
     }
     
