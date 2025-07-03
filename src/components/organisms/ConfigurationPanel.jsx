@@ -9,6 +9,7 @@ import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
 // Enhanced serialization for Apper SDK with comprehensive DataCloneError prevention
+// Enhanced serialization function specifically for Apper integration
 const serializeForApper = (obj, visited = new WeakSet()) => {
   try {
     // Handle null/undefined
@@ -26,26 +27,29 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
       return '[Circular Reference]';
     }
     visited.add(obj);
+visited.add(obj);
     
-    // Handle specific problematic types
-    if (obj instanceof Request) {
+    // Handle specific problematic types comprehensively
+    if (typeof Request !== 'undefined' && obj instanceof Request) {
       return {
         __type: 'Request',
         url: obj.url,
         method: obj.method,
-        headers: Object.fromEntries(obj.headers || [])
+        headers: obj.headers ? Object.fromEntries(obj.headers) : {},
+        mode: obj.mode,
+        credentials: obj.credentials
       };
     }
-    
-    if (obj instanceof Response) {
+if (typeof Response !== 'undefined' && obj instanceof Response) {
       return {
         __type: 'Response',
         status: obj.status,
         statusText: obj.statusText,
-        url: obj.url
+        url: obj.url,
+        ok: obj.ok,
+        type: obj.type
       };
     }
-    
     if (obj instanceof Promise) {
       return { __type: 'Promise', state: 'pending' };
     }
@@ -58,21 +62,69 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
       return {
         __type: 'Error',
         name: obj.name,
-        message: obj.message
+        message: obj.message,
+        stack: obj.stack ? obj.stack.split('\n').slice(0, 3).join('\n') : undefined
       };
     }
     
     if (obj instanceof Date) {
       return { __type: 'Date', value: obj.toISOString() };
     }
+}
     
-    if (obj instanceof File) {
+    if (typeof File !== 'undefined' && obj instanceof File) {
       return {
         __type: 'File',
         name: obj.name,
         size: obj.size,
+        type: obj.type,
+        lastModified: obj.lastModified
+      };
+    }
+    if (obj instanceof Blob) {
+      return {
+        __type: 'Blob',
+        size: obj.size,
         type: obj.type
       };
+    }
+    
+// Handle DOM elements
+    if (typeof Element !== 'undefined' && obj instanceof Element) {
+      return {
+        __type: 'Element',
+        tagName: obj.tagName,
+        id: obj.id,
+        className: obj.className
+      };
+    }
+    // Handle other non-cloneable objects
+    if (obj instanceof RegExp) {
+      return { __type: 'RegExp', pattern: obj.source, flags: obj.flags };
+    }
+    
+    if (obj instanceof Map) {
+      return { __type: 'Map', entries: Array.from(obj.entries()) };
+    }
+    
+    if (obj instanceof Set) {
+      return { __type: 'Set', values: Array.from(obj.values()) };
+    }
+    
+    if (obj instanceof ArrayBuffer) {
+      return { __type: 'ArrayBuffer', byteLength: obj.byteLength };
+    }
+    
+    if (obj instanceof DataView) {
+      return { __type: 'DataView', byteLength: obj.byteLength };
+    }
+    
+    // Handle typed arrays
+    if (obj instanceof Int8Array || obj instanceof Uint8Array || 
+        obj instanceof Int16Array || obj instanceof Uint16Array ||
+        obj instanceof Int32Array || obj instanceof Uint32Array ||
+        obj instanceof Float32Array || obj instanceof Float64Array) {
+      return { __type: 'TypedArray', constructor: obj.constructor.name, length: obj.length };
     }
     
     // Handle arrays
@@ -85,6 +137,13 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
     for (const key in obj) {
       if (obj.hasOwnProperty(key)) {
         try {
+          // Skip non-enumerable properties and getters/setters
+          const descriptor = Object.getOwnPropertyDescriptor(obj, key);
+          if (descriptor && descriptor.get) {
+            serialized[key] = '[Getter Property]';
+            continue;
+          }
+          
           serialized[key] = serializeForApper(obj[key], visited);
         } catch (error) {
           console.warn(`Failed to serialize property ${key}:`, error);
@@ -97,6 +156,35 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
   } catch (error) {
     console.error('Apper serialization error:', error);
     return { error: 'Serialization failed', originalType: typeof obj };
+  }
+}
+
+// Validation function to ensure data is safe for postMessage
+const validateSerializedData = (data) => {
+  try {
+    // Test JSON serialization
+    const jsonString = JSON.stringify(data);
+    JSON.parse(jsonString);
+    
+    // Additional checks for problematic patterns
+    const checkForProblematicTypes = (obj) => {
+      if (typeof obj === 'function') return false;
+      if (obj instanceof Promise) return false;
+      if (obj instanceof Error && obj.stack) return false;
+      if (typeof obj === 'object' && obj !== null) {
+        for (const key in obj) {
+          if (obj.hasOwnProperty(key) && !checkForProblematicTypes(obj[key])) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+    
+    return checkForProblematicTypes(data);
+  } catch (error) {
+    console.error('Data validation failed:', error);
+    return false;
   }
 }
 
@@ -204,7 +292,7 @@ const handleSaveConfig = async () => {
       setConfigs(prev => [...prev, savedConfig])
       
       // Send notification to Apper if available with enhanced error handling
-      if (window.Apper) {
+if (window.Apper) {
         try {
           const apperNotificationData = serializeForApper({
             type: 'config_saved',
@@ -213,6 +301,10 @@ const handleSaveConfig = async () => {
           });
           
           // Validate serialization worked
+          if (!validateSerializedData(apperNotificationData)) {
+            throw new Error('Data validation failed - contains non-serializable content');
+          }
+          
           const testSerialization = JSON.stringify(apperNotificationData);
           JSON.parse(testSerialization);
           
@@ -222,11 +314,19 @@ const handleSaveConfig = async () => {
           
           // Send minimal fallback notification
           try {
-            window.Apper.sendNotification({
+            const fallbackData = {
               type: 'config_saved',
               status: 'success',
+              configId: savedConfig?.id,
               timestamp: new Date().toISOString()
-            });
+            };
+            
+            // Validate fallback data too
+            if (validateSerializedData(fallbackData)) {
+              window.Apper.sendNotification(fallbackData);
+            } else {
+              console.error('Even fallback data failed validation');
+            }
           } catch (fallbackError) {
             console.error('Even fallback Apper notification failed:', fallbackError);
           }
@@ -244,7 +344,7 @@ const handleSaveConfig = async () => {
       setShowForm(false)
       
       // Notify Apper about the new configuration with safe postMessage
-      if (window.parent && window.parent.postMessage) {
+if (window.parent && window.parent.postMessage) {
         const apperNotificationData = serializeForApper({
           type: 'S3_CONFIG_SAVED',
           config: {
@@ -254,29 +354,41 @@ const handleSaveConfig = async () => {
             region: savedConfig.region,
             savedAt: new Date().toISOString()
           }
-        })
+        });
         
         try {
+          // Validate data before sending
+          if (!validateSerializedData(apperNotificationData)) {
+            throw new Error('Data validation failed - contains non-serializable content');
+          }
+          
           // Use global safePostMessage if available
           if (window.safePostMessage) {
-            window.safePostMessage(window.parent, apperNotificationData, '*')
+            window.safePostMessage(window.parent, apperNotificationData, '*');
           } else {
-            window.parent.postMessage(apperNotificationData, '*')
+            window.parent.postMessage(apperNotificationData, '*');
           }
         } catch (postError) {
-          console.warn('Failed to notify Apper about config save:', postError)
+          console.warn('Failed to notify Apper about config save:', postError);
           if (postError.name === 'DataCloneError') {
-            console.error('DataCloneError: Configuration data contains non-cloneable objects')
+            console.error('DataCloneError: Configuration data contains non-cloneable objects');
             // Send minimal fallback notification
             try {
-              window.parent.postMessage({
+              const fallbackData = {
                 type: 'S3_CONFIG_SAVED_ERROR',
                 error: 'Configuration saved but notification failed due to data serialization',
                 configId: savedConfig.id,
                 timestamp: Date.now()
-              }, '*')
+              };
+              
+              // Validate fallback data
+              if (validateSerializedData(fallbackData)) {
+                window.parent.postMessage(fallbackData, '*');
+              } else {
+                console.error('Even fallback data failed validation');
+              }
             } catch (fallbackError) {
-              console.error('Even fallback notification failed:', fallbackError)
+              console.error('Even fallback notification failed:', fallbackError);
             }
           }
         }
@@ -309,7 +421,7 @@ const handleSetActive = async (configId) => {
       toast.success('Configuration activated!')
       
       // Notify Apper about the active config change with safe postMessage
-      if (window.parent && window.parent.postMessage) {
+if (window.parent && window.parent.postMessage) {
         const serializedConfig = serializeForApper({
           type: 'S3_CONFIG_ACTIVATED',
           config: {
@@ -320,29 +432,41 @@ const handleSetActive = async (configId) => {
             isActive: updatedConfig.isActive,
             activatedAt: new Date().toISOString()
           }
-        })
+        });
         
         try {
+          // Validate data before sending
+          if (!validateSerializedData(serializedConfig)) {
+            throw new Error('Data validation failed - contains non-serializable content');
+          }
+          
           // Use global safePostMessage if available
           if (window.safePostMessage) {
-            window.safePostMessage(window.parent, serializedConfig, '*')
+            window.safePostMessage(window.parent, serializedConfig, '*');
           } else {
-            window.parent.postMessage(serializedConfig, '*')
+            window.parent.postMessage(serializedConfig, '*');
           }
         } catch (postError) {
-          console.warn('Failed to notify Apper about config activation:', postError)
+          console.warn('Failed to notify Apper about config activation:', postError);
           if (postError.name === 'DataCloneError') {
-            console.error('DataCloneError: Config activation data contains non-cloneable objects')
+            console.error('DataCloneError: Config activation data contains non-cloneable objects');
             // Send minimal fallback notification
             try {
-              window.parent.postMessage({
+              const fallbackData = {
                 type: 'S3_CONFIG_ACTIVATED_ERROR',
                 error: 'Configuration activated but notification failed due to data serialization',
                 configId: updatedConfig.Id,
                 timestamp: Date.now()
-              }, '*')
+              };
+              
+              // Validate fallback data
+              if (validateSerializedData(fallbackData)) {
+                window.parent.postMessage(fallbackData, '*');
+              } else {
+                console.error('Even fallback data failed validation');
+              }
             } catch (fallbackError) {
-              console.error('Even fallback notification failed:', fallbackError)
+              console.error('Even fallback notification failed:', fallbackError);
             }
           }
         }
@@ -374,7 +498,7 @@ const handleDeleteConfig = async (configId) => {
       }
       
       // Send notification to Apper if available with enhanced error handling
-      if (window.Apper) {
+if (window.Apper) {
         try {
           const serializedConfig = serializeForApper({
             type: 'config_deleted',
@@ -383,6 +507,10 @@ const handleDeleteConfig = async (configId) => {
           });
           
           // Validate serialization worked
+          if (!validateSerializedData(serializedConfig)) {
+            throw new Error('Data validation failed - contains non-serializable content');
+          }
+          
           const testSerialization = JSON.stringify(serializedConfig);
           JSON.parse(testSerialization);
           
@@ -392,11 +520,18 @@ const handleDeleteConfig = async (configId) => {
           
           // Send minimal fallback notification
           try {
-            window.Apper.sendNotification({
+            const fallbackData = {
               type: 'config_deleted',
               configId: configId,
               timestamp: new Date().toISOString()
-            });
+            };
+            
+            // Validate fallback data
+            if (validateSerializedData(fallbackData)) {
+              window.Apper.sendNotification(fallbackData);
+            } else {
+              console.error('Even fallback data failed validation');
+            }
           } catch (fallbackError) {
             console.error('Even fallback Apper deletion notification failed:', fallbackError);
           }

@@ -4,17 +4,12 @@ import { ToastContainer } from "react-toastify";
 import React, { useEffect, useState } from "react";
 import ErrorComponent from "@/components/ui/Error";
 import S3Manager from "@/components/pages/S3Manager";
-// Helper function to safely serialize data for postMessage - moved outside component
+
 // Enhanced safe serialization function to handle complex objects and prevent DataCloneError
 function safeSerialize(data, visited = new WeakSet()) {
-  try {
-    // Handle null/undefined
-    if (data === null || data === undefined) {
-      return data;
-    }
-    
-    // Handle primitives
-    if (typeof data !== 'object') {
+try {
+    // Handle null/undefined/primitives
+    if (data === null || data === undefined || typeof data !== 'object') {
       return data;
     }
     
@@ -24,24 +19,23 @@ function safeSerialize(data, visited = new WeakSet()) {
     }
     visited.add(data);
     
-    // Handle specific problematic types
+    // Handle non-cloneable types comprehensively
     if (data instanceof Request) {
-      return {
-        __type: 'Request',
-        url: data.url,
+      return { 
+        __type: 'Request', 
+        url: data.url, 
         method: data.method,
-        headers: Object.fromEntries(data.headers || []),
-        body: '[Request Body]'
+        headers: data.headers ? Object.fromEntries(data.headers) : {}
       };
     }
     
     if (data instanceof Response) {
-      return {
-        __type: 'Response',
-        status: data.status,
+      return { 
+        __type: 'Response', 
+        status: data.status, 
         statusText: data.statusText,
         url: data.url,
-        headers: Object.fromEntries(data.headers || [])
+        ok: data.ok
       };
     }
     
@@ -54,11 +48,21 @@ function safeSerialize(data, visited = new WeakSet()) {
     }
     
     if (data instanceof Error) {
-      return {
-        __type: 'Error',
-        name: data.name,
+      return { 
+        __type: 'Error', 
+        name: data.name, 
         message: data.message,
-        stack: data.stack
+        stack: data.stack ? data.stack.split('\n').slice(0, 3).join('\n') : undefined
+      };
+    }
+    
+    if (data instanceof File) {
+      return { 
+        __type: 'File', 
+        name: data.name, 
+        size: data.size, 
+        type: data.type,
+        lastModified: data.lastModified
       };
     }
     
@@ -66,18 +70,27 @@ function safeSerialize(data, visited = new WeakSet()) {
       return { __type: 'Date', value: data.toISOString() };
     }
     
-    if (data instanceof RegExp) {
-      return { __type: 'RegExp', source: data.source, flags: data.flags };
+    // Handle DOM elements
+    if (data instanceof Element) {
+      return { 
+        __type: 'Element', 
+        tagName: data.tagName,
+        id: data.id,
+        className: data.className
+      };
     }
     
-    if (data instanceof File) {
-      return {
-        __type: 'File',
-        name: data.name,
-        size: data.size,
-        type: data.type,
-        lastModified: data.lastModified
-      };
+    // Handle other non-cloneable objects
+    if (data instanceof RegExp) {
+      return { __type: 'RegExp', pattern: data.source, flags: data.flags };
+    }
+    
+    if (data instanceof Map) {
+      return { __type: 'Map', entries: Array.from(data.entries()) };
+    }
+    
+    if (data instanceof Set) {
+      return { __type: 'Set', values: Array.from(data.values()) };
     }
     
     if (data instanceof FormData) {
@@ -98,9 +111,8 @@ function safeSerialize(data, visited = new WeakSet()) {
     for (const key in data) {
       if (data.hasOwnProperty(key)) {
         try {
-serialized[key] = safeSerialize(data[key], visited);
+          serialized[key] = safeSerialize(data[key], visited);
         } catch (error) {
-          // Skip problematic properties
           console.warn(`Failed to serialize property ${key}:`, error);
           serialized[key] = '[Serialization Error]';
         }
@@ -110,10 +122,9 @@ serialized[key] = safeSerialize(data[key], visited);
     return serialized;
   } catch (error) {
     console.error('Serialization error:', error);
-    return '[Serialization Failed]';
+    return { error: 'Serialization failed', originalType: typeof data };
   }
 }
-
 // Enhanced safe postMessage wrapper with comprehensive error handling
 function safePostMessage(targetWindow, data, targetOrigin = "*") {
   if (!targetWindow || !targetWindow.postMessage) {
@@ -149,10 +160,27 @@ function safePostMessage(targetWindow, data, targetOrigin = "*") {
     return false;
   }
 }
-
 // Enhanced error handler for postMessage events
 function handlePostMessageError(event) {
   console.error('PostMessage error event:', event);
+  
+  // Check for DataCloneError patterns
+  if (event.error && event.error.name === 'DataCloneError') {
+    console.error('DataCloneError detected in postMessage communication');
+    
+    // Attempt to send a safe error notification
+    try {
+      if (window.parent && window.parent.postMessage) {
+        window.parent.postMessage({
+          type: 'APPER_DATACLONE_ERROR',
+          error: 'Communication failed due to non-serializable data',
+          timestamp: Date.now()
+        }, '*');
+      }
+    } catch (notificationError) {
+      console.error('Failed to send DataCloneError notification:', notificationError);
+    }
+  }
   
   // Log detailed error information
   if (event.data && event.data.__type === 'FallbackMessage') {
@@ -164,7 +192,6 @@ function handlePostMessageError(event) {
     window.toast.error('Communication error with Apper. Please try again.');
   }
 }
-
 // Initialize error handling for postMessage
 if (typeof window !== 'undefined') {
   window.addEventListener('messageerror', handlePostMessageError);
@@ -174,7 +201,7 @@ function App() {
   const [apperReady, setApperReady] = useState(false);
   const [apperError, setApperError] = useState(null);
 
-useEffect(() => {
+  useEffect(() => {
     let script = null;
     let timeoutId = null;
     let isComponentMounted = true;
@@ -326,8 +353,8 @@ useEffect(() => {
     };
   }, []);
 
-  if (apperError) {
-return <ErrorComponent message={`Apper initialization failed: ${apperError.message || apperError}`} />;
+if (apperError) {
+    return <ErrorComponent message={`Apper initialization failed: ${apperError.message || apperError}`} />;
   }
 
   return (
