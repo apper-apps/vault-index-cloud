@@ -174,53 +174,131 @@ function App() {
   const [apperReady, setApperReady] = useState(false);
   const [apperError, setApperError] = useState(null);
 
-  useEffect(() => {
+useEffect(() => {
+    let script = null;
+    let timeoutId = null;
+    let isComponentMounted = true;
+
     const initializeApper = async () => {
       try {
-        const script = document.createElement('script');
-        script.src = import.meta.env.VITE_APPER_SDK_CDN_URL;
+        // Validate environment variables
+        const sdkUrl = import.meta.env.VITE_APPER_SDK_CDN_URL;
+        const projectId = import.meta.env.VITE_APPER_PROJECT_ID;
+        const publicKey = import.meta.env.VITE_APPER_PUBLIC_KEY;
+
+        if (!sdkUrl || !projectId || !publicKey) {
+          throw new Error('Missing required Apper configuration. Please check your environment variables.');
+        }
+
+        script = document.createElement('script');
+        script.src = sdkUrl;
         script.async = true;
         
+        // Set up timeout for script loading
+        timeoutId = setTimeout(() => {
+          if (isComponentMounted) {
+            console.error('Apper SDK loading timeout');
+            setApperError(new Error('Apper SDK failed to load within timeout period'));
+          }
+        }, 15000); // 15 second timeout
+
         script.onload = async () => {
+          if (!isComponentMounted) return;
+
           try {
-            if (window.Apper) {
-              await window.Apper.init({
-                projectId: import.meta.env.VITE_APPER_PROJECT_ID,
-                publicKey: import.meta.env.VITE_APPER_PUBLIC_KEY,
-                postMessage: (data, targetOrigin) => {
-                  return safePostMessage(window, data, targetOrigin);
-                },
-                onError: (error) => {
-                  console.error('Apper error:', error);
+            // Clear the loading timeout
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+
+            // Poll for SDK availability with timeout
+            const pollForSDK = async (maxAttempts = 50, interval = 200) => {
+              for (let i = 0; i < maxAttempts; i++) {
+                if (!isComponentMounted) return false;
+                
+                if (window.Apper && typeof window.Apper.init === 'function') {
+                  return true;
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, interval));
+              }
+              return false;
+            };
+
+            const sdkReady = await pollForSDK();
+            
+            if (!sdkReady) {
+              throw new Error('Apper SDK not available after polling. The SDK may have failed to initialize properly.');
+            }
+
+            // Initialize the SDK
+            await window.Apper.init({
+              projectId: projectId,
+              publicKey: publicKey,
+              postMessage: (data, targetOrigin) => {
+                return safePostMessage(window, data, targetOrigin);
+              },
+              onError: (error) => {
+                console.error('Apper runtime error:', error);
+                if (isComponentMounted) {
                   setApperError(error);
-                },
-                onReady: () => {
-                  console.log('Apper SDK initialized successfully');
+                }
+              },
+              onReady: () => {
+                console.log('Apper SDK initialized successfully');
+                if (isComponentMounted) {
                   setApperReady(true);
                 }
-              });
-            } else {
-              throw new Error('Apper SDK not loaded properly');
-            }
+              }
+            });
+
           } catch (error) {
             console.error('Apper initialization error:', error);
-            setApperError(error);
+            if (isComponentMounted) {
+              setApperError(new Error(`Apper initialization failed: ${error.message || error}`));
+            }
           }
         };
         
         script.onerror = (error) => {
+          if (!isComponentMounted) return;
+          
           console.error('Failed to load Apper SDK:', error);
-          setApperError(new Error('Failed to load Apper SDK'));
+          
+          // Clear timeout on error
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+          
+          setApperError(new Error(`Failed to load Apper SDK from ${sdkUrl}. Please check your internet connection and try again.`));
         };
         
         document.head.appendChild(script);
+        
       } catch (error) {
         console.error('Error initializing Apper:', error);
-        setApperError(error);
+        if (isComponentMounted) {
+          setApperError(new Error(`Apper setup failed: ${error.message || error}`));
+        }
       }
     };
 
     initializeApper();
+
+    // Cleanup function
+    return () => {
+      isComponentMounted = false;
+      
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
+      if (script && script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    };
   }, []);
 
   useEffect(() => {
