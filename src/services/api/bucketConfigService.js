@@ -1,5 +1,18 @@
 import bucketConfigsData from '@/services/mockData/bucketConfigs.json'
 
+// Utility function to ensure objects are serializable (prevent DataCloneError)
+const makeSerializable = (obj) => {
+  if (obj === null || obj === undefined) return obj
+  if (typeof obj !== 'object') return obj
+  
+  try {
+    return JSON.parse(JSON.stringify(obj))
+  } catch (error) {
+    console.warn('Object could not be serialized, creating safe copy:', error)
+    return {}
+  }
+}
+
 class BucketConfigService {
   constructor() {
     this.configs = [...bucketConfigsData]
@@ -25,27 +38,27 @@ class BucketConfigService {
     }
   }
 
-  async getAll() {
+async getAll() {
     await new Promise(resolve => setTimeout(resolve, 300))
-    return [...this.configs]
+    return makeSerializable([...this.configs])
   }
 
-  async getById(id) {
+async getById(id) {
     await new Promise(resolve => setTimeout(resolve, 200))
     const config = this.configs.find(c => c.Id === parseInt(id))
     if (!config) {
       throw new Error('Configuration not found')
     }
-    return { ...config }
+    return makeSerializable({ ...config })
   }
 
-  async getActive() {
+async getActive() {
     await new Promise(resolve => setTimeout(resolve, 200))
     const active = this.configs.find(c => c.isActive)
-    return active ? { ...active } : null
+    return active ? makeSerializable({ ...active }) : null
   }
 
-  async create(configData) {
+async create(configData) {
     await new Promise(resolve => setTimeout(resolve, 400))
     
     // Deactivate all other configs
@@ -54,15 +67,17 @@ class BucketConfigService {
     const newConfig = {
       Id: Math.max(...this.configs.map(c => c.Id), 0) + 1,
       ...configData,
-      isActive: true
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }
     
     this.configs.push(newConfig)
     this.saveToLocalStorage()
-    return { ...newConfig }
+    return makeSerializable({ ...newConfig })
   }
 
-  async update(id, configData) {
+async update(id, configData) {
     await new Promise(resolve => setTimeout(resolve, 400))
     
     const index = this.configs.findIndex(c => c.Id === parseInt(id))
@@ -75,9 +90,13 @@ class BucketConfigService {
       this.configs.forEach(c => c.isActive = false)
     }
 
-    this.configs[index] = { ...this.configs[index], ...configData }
+    this.configs[index] = { 
+      ...this.configs[index], 
+      ...configData,
+      updatedAt: new Date().toISOString()
+    }
     this.saveToLocalStorage()
-    return { ...this.configs[index] }
+    return makeSerializable({ ...this.configs[index] })
   }
 
   async delete(id) {
@@ -93,7 +112,7 @@ class BucketConfigService {
     return true
   }
 
-  async setActive(id) {
+async setActive(id) {
     await new Promise(resolve => setTimeout(resolve, 300))
     
     const config = this.configs.find(c => c.Id === parseInt(id))
@@ -106,8 +125,9 @@ class BucketConfigService {
     
     // Activate the selected config
     config.isActive = true
+    config.updatedAt = new Date().toISOString()
     this.saveToLocalStorage()
-    return { ...config }
+    return makeSerializable({ ...config })
   }
 
   async testConnection(configData) {

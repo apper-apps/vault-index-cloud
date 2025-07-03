@@ -7,6 +7,19 @@ import FileUploader from "@/components/organisms/FileUploader";
 import FileBrowser from "@/components/organisms/FileBrowser";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
+// Utility function to ensure objects are serializable (prevent DataCloneError)
+const makeSerializable = (obj) => {
+  if (obj === null || obj === undefined) return obj
+  if (typeof obj !== 'object') return obj
+  
+  try {
+    return JSON.parse(JSON.stringify(obj))
+  } catch (error) {
+    console.warn('Object could not be serialized, creating safe copy:', error)
+    return {}
+  }
+}
+
 const S3ManagerPage = () => {
 const [activeConfig, setActiveConfig] = useState(null)
   const [currentPath, setCurrentPath] = useState('')
@@ -31,19 +44,38 @@ const [activeConfig, setActiveConfig] = useState(null)
 
 const handleConfigSaved = (config) => {
     try {
-      // Ensure config is serializable before setting state
-      const cleanConfig = {
+      // Ensure config is fully serializable before setting state
+      const cleanConfig = makeSerializable({
         Id: config?.Id,
         name: config?.name,
         bucketName: config?.bucketName,
         region: config?.region,
-        isActive: config?.isActive
-      }
+        isActive: config?.isActive,
+        createdAt: config?.createdAt,
+        updatedAt: config?.updatedAt
+      })
+      
+      // Verify serializability
+      JSON.stringify(cleanConfig)
+      
       setActiveConfig(cleanConfig)
       toast.success('Configuration updated successfully!')
     } catch (err) {
       console.error('Error handling config save:', err)
-      toast.error('Configuration updated but display may be affected')
+      
+      // Fallback to minimal safe config
+      try {
+        const minimalConfig = {
+          Id: config?.Id,
+          name: config?.name || 'Unknown',
+          isActive: config?.isActive || false
+        }
+        setActiveConfig(minimalConfig)
+        toast.warning('Configuration updated with limited data')
+      } catch (fallbackError) {
+        console.error('Fallback config creation failed:', fallbackError)
+        toast.error('Configuration updated but display may be affected')
+      }
     }
   }
 
@@ -56,12 +88,23 @@ const handleUploadComplete = () => {
     if (activeTab === 'browser') {
       try {
         if (typeof window !== 'undefined' && window.CustomEvent) {
+          // Ensure event detail is serializable
+          const eventDetail = makeSerializable({ 
+            timestamp: Date.now(),
+            source: 'upload'
+          })
           window.dispatchEvent(new window.CustomEvent('refreshFiles', { 
-            detail: { timestamp: Date.now() } 
+            detail: eventDetail 
           }))
         }
       } catch (eventError) {
         console.error('Failed to dispatch refresh event:', eventError)
+        // Fallback to simple refresh without detail
+        try {
+          window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+        } catch (fallbackError) {
+          console.error('Fallback event dispatch failed:', fallbackError)
+        }
       }
     }
     // Force a reload of the active config to ensure consistency
@@ -72,12 +115,23 @@ const handleRefresh = () => {
     // Trigger refresh for file browser with consistent event creation
     try {
       if (typeof window !== 'undefined' && window.CustomEvent) {
+        // Ensure event detail is serializable
+        const eventDetail = makeSerializable({ 
+          timestamp: Date.now(), 
+          source: 'manual' 
+        })
         window.dispatchEvent(new window.CustomEvent('refreshFiles', { 
-          detail: { timestamp: Date.now(), source: 'manual' } 
+          detail: eventDetail 
         }))
       }
     } catch (eventError) {
       console.error('Failed to dispatch refresh event:', eventError)
+      // Fallback to simple refresh without detail
+      try {
+        window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+      } catch (fallbackError) {
+        console.error('Fallback event dispatch failed:', fallbackError)
+      }
     }
   }
 

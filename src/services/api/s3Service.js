@@ -1,6 +1,8 @@
-import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3'
-import { Upload } from '@aws-sdk/lib-storage'
-import bucketConfigService from '@/services/api/bucketConfigService'
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+import React from "react";
+import Error from "@/components/ui/Error";
+import bucketConfigService from "@/services/api/bucketConfigService";
 // Utility function to ensure objects are serializable (prevent DataCloneError)
 const makeSerializable = (obj) => {
   if (obj === null || obj === undefined) return obj
@@ -111,10 +113,10 @@ class S3Service {
         }
       })
 
-      // Process files
+// Process files
       const files = (response.Contents || [])
         .filter(obj => obj.Key !== prefix) // Exclude the prefix itself
-        .map(obj => ({
+        .map(obj => makeSerializable({
           key: obj.Key,
           name: obj.Key.split('/').pop(),
           size: obj.Size,
@@ -124,11 +126,13 @@ class S3Service {
           isFolder: false
         }))
 
-      return [...folders, ...files].sort((a, b) => {
+      const result = [...folders, ...files].sort((a, b) => {
         if (a.isFolder && !b.isFolder) return -1
         if (!a.isFolder && b.isFolder) return 1
         return a.name.localeCompare(b.name)
       })
+
+      return makeSerializable(result)
     } catch (error) {
       throw new Error(`Failed to list files: ${error.message}`)
     }
@@ -168,8 +172,8 @@ class S3Service {
         }
       })
 
-      await upload.done()
-      return { key, size: file.size, type: file.type }
+await upload.done()
+      return makeSerializable({ key, size: file.size, type: file.type })
     } catch (error) {
       throw new Error(`Failed to upload file: ${error.message}`)
     }
@@ -199,16 +203,17 @@ class S3Service {
       const blob = new Blob(chunks, { type: response.ContentType })
       const url = URL.createObjectURL(blob)
       
-      return {
+      return makeSerializable({
         url,
         filename: fileKey.split('/').pop(),
         size: response.ContentLength
-      }
+      })
     } catch (error) {
       throw new Error(`Failed to download file: ${error.message}`)
     }
   }
-async deleteFile(fileKey) {
+
+  async deleteFile(fileKey) {
     try {
       await this.ensureClient()
       
@@ -273,12 +278,12 @@ async deleteFile(fileKey) {
 
       const response = await this.s3Client.send(command)
       
-      const filteredFiles = (response.Contents || [])
+const filteredFiles = (response.Contents || [])
         .filter(obj => {
           const fileName = obj.Key.split('/').pop().toLowerCase()
           return fileName.includes(searchTerm)
         })
-        .map(obj => ({
+        .map(obj => makeSerializable({
           key: obj.Key,
           name: obj.Key.split('/').pop(),
           size: obj.Size,
@@ -288,7 +293,7 @@ async deleteFile(fileKey) {
           isFolder: false
         }))
 
-      return filteredFiles
+      return makeSerializable(filteredFiles)
     } catch (error) {
       throw new Error(`Failed to search files: ${error.message}`)
     }
@@ -353,14 +358,16 @@ async deleteFile(fileKey) {
     return this.currentPath
   }
 
-  getPathBreadcrumbs() {
+getPathBreadcrumbs() {
     if (!this.currentPath) return []
     
     const parts = this.currentPath.split('/')
-    return parts.map((part, index) => ({
+    const breadcrumbs = parts.map((part, index) => ({
       name: part,
       path: parts.slice(0, index + 1).join('/')
     }))
+    
+    return makeSerializable(breadcrumbs)
   }
 }
 export default new S3Service()

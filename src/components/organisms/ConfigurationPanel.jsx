@@ -95,7 +95,9 @@ const handleSaveConfig = async () => {
         bucketName: savedConfig.bucketName,
         region: savedConfig.region,
         isActive: savedConfig.isActive,
-        createdAt: savedConfig.createdAt ? new Date(savedConfig.createdAt).toISOString() : null
+        createdAt: savedConfig.createdAt ? 
+          (typeof savedConfig.createdAt === 'string' ? savedConfig.createdAt : new Date(savedConfig.createdAt).toISOString()) : 
+          null
       }
       
       setConfigs(prev => [...prev, savedConfig])
@@ -110,12 +112,24 @@ const handleSaveConfig = async () => {
       setShowForm(false)
       toast.success('Configuration saved successfully!')
       
-      // Safe callback with error handling
+      // Safe callback with error handling and serialization verification
       try {
+        // Double-check serializability before callback
+        JSON.stringify(serializableConfig)
         onConfigSaved?.(serializableConfig)
       } catch (callbackError) {
         console.error('Callback error:', callbackError)
-        // Don't throw - config was saved successfully
+        // Fallback with minimal safe config
+        const minimalConfig = {
+          Id: savedConfig.Id,
+          name: savedConfig.name,
+          isActive: savedConfig.isActive
+        }
+        try {
+          onConfigSaved?.(minimalConfig)
+        } catch (fallbackError) {
+          console.error('Fallback callback also failed:', fallbackError)
+        }
       }
     } catch (err) {
       toast.error(err?.message || 'Failed to save configuration')
@@ -133,19 +147,33 @@ const handleSetActive = async (configId) => {
         bucketName: updatedConfig.bucketName,
         region: updatedConfig.region,
         isActive: updatedConfig.isActive,
-        updatedAt: updatedConfig.updatedAt ? new Date(updatedConfig.updatedAt).toISOString() : null
+        updatedAt: updatedConfig.updatedAt ? 
+          (typeof updatedConfig.updatedAt === 'string' ? updatedConfig.updatedAt : new Date(updatedConfig.updatedAt).toISOString()) : 
+          null
       }
       
       setActiveConfig(updatedConfig)
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
       toast.success('Configuration activated!')
       
-      // Safe callback with error handling
+      // Safe callback with error handling and serialization verification
       try {
+        // Double-check serializability before callback
+        JSON.stringify(serializableConfig)
         onConfigSaved?.(serializableConfig)
       } catch (callbackError) {
         console.error('Callback error:', callbackError)
-        // Don't throw - config was activated successfully
+        // Fallback with minimal safe config
+        const minimalConfig = {
+          Id: updatedConfig.Id,
+          name: updatedConfig.name,
+          isActive: updatedConfig.isActive
+        }
+        try {
+          onConfigSaved?.(minimalConfig)
+        } catch (fallbackError) {
+          console.error('Fallback callback also failed:', fallbackError)
+        }
       }
     } catch (err) {
       toast.error(err?.message || 'Failed to activate configuration')
