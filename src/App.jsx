@@ -2,7 +2,7 @@ import "@/index.css";
 import { Route, Routes } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import React, { useEffect, useState } from "react";
-import Error from "@/components/ui/Error";
+import ErrorComponent from "@/components/ui/Error";
 import S3Manager from "@/components/pages/S3Manager";
 // Helper function to safely serialize data for postMessage - moved outside component
 // Enhanced safe serialization function to handle complex objects and prevent DataCloneError
@@ -249,7 +249,7 @@ function App() {
   }, []);
 
   if (apperError) {
-    return <Error message={`Apper initialization failed: ${apperError.message || apperError}`} />;
+return <ErrorComponent message={`Apper initialization failed: ${apperError.message || apperError}`} />;
   }
 
   return (
