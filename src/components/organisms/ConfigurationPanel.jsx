@@ -11,77 +11,94 @@ import bucketConfigService from "@/services/api/bucketConfigService";
 
 // Enhanced safe serialization function for Apper communication
 function serializeForApper(obj, visited = new WeakSet()) {
-  if (obj === null || obj === undefined) return obj;
-  
-  // Handle primitives - remove functions and symbols completely
-  if (typeof obj !== 'object') {
-    if (typeof obj === 'function' || typeof obj === 'symbol' || typeof obj === 'undefined') {
-      return undefined;
-    }
-    // Handle bigint
-    if (typeof obj === 'bigint') {
-      return obj.toString();
-    }
-    return obj;
-  }
-  
-  // Handle circular references
-  if (visited.has(obj)) {
-    return null; // Return null instead of string to avoid cloning issues
-  }
-  visited.add(obj);
-  
-  // Handle Date objects
-  if (obj instanceof Date) {
-    return obj.toISOString();
-  }
-  
-  // Handle all non-serializable Web API objects and DOM elements
-  if (obj instanceof Request || obj instanceof Response || 
-      obj instanceof FormData || obj instanceof File || 
-      obj instanceof Blob || obj instanceof ArrayBuffer ||
-      obj instanceof Element || obj instanceof Node ||
-      obj instanceof Error || obj instanceof RegExp ||
-      obj.constructor?.name?.includes('Request') ||
-      obj.constructor?.name?.includes('Response') ||
-      obj.constructor?.name?.includes('Element') ||
-      obj.constructor?.name?.includes('HTML') ||
-      obj.nodeType !== undefined || // DOM nodes
-      obj.window !== undefined || // Window objects
-      typeof obj.then === 'function' // Promises
-    ) {
-    return null; // Return null to avoid serialization
-  }
-  
-  // Handle Arrays
-  if (Array.isArray(obj)) {
-    const cleaned = obj.map(item => serializeForApper(item, visited))
-                      .filter(item => item !== undefined);
-    return cleaned;
-  }
-  
-  // Handle plain objects - only process enumerable own properties
-const result = {};
-  
-  // Only process enumerable own properties
   try {
-    for (const [key, value] of Object.entries(obj)) {
-      // Skip non-string keys and function/symbol keys
-      if (typeof key !== 'string') continue;
-      
-      const serializedValue = serializeForApper(value, visited);
-      if (serializedValue !== undefined && serializedValue !== null) {
-        result[key] = serializedValue;
+    // Handle null/undefined/primitives first
+    if (obj === null || obj === undefined) return obj;
+    
+    // Handle primitives - exclude problematic types
+    if (typeof obj !== 'object') {
+      if (typeof obj === 'function' || typeof obj === 'symbol' || typeof obj === 'undefined') {
+        return null; // Return null instead of string representation
       }
+      // Handle bigint
+      if (typeof obj === 'bigint') {
+        return obj.toString();
+      }
+      return obj;
     }
-  } catch (error) {
-    console.warn('Error during object serialization:', error);
+    
+    // Handle circular references
+    if (visited.has(obj)) {
+      return null; // Return null instead of string to avoid cloning issues
+    }
+    visited.add(obj);
+    
+    // Handle Date objects first (before general object checking)
+    if (obj instanceof Date) {
+      return obj.toISOString();
+    }
+    
+// Handle all non-cloneable Web API objects and DOM elements comprehensively
+    if ((typeof Request !== 'undefined' && obj instanceof Request) || 
+        (typeof Response !== 'undefined' && obj instanceof Response) || 
+        (typeof FormData !== 'undefined' && obj instanceof FormData) || 
+        (typeof File !== 'undefined' && obj instanceof File) || 
+        (typeof Blob !== 'undefined' && obj instanceof Blob) || 
+        (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) ||
+        (typeof Element !== 'undefined' && obj instanceof Element) || 
+        (typeof Node !== 'undefined' && obj instanceof Node) ||
+        obj instanceof Error || obj instanceof RegExp ||
+        obj instanceof Map || obj instanceof Set ||
+        obj instanceof Promise || obj instanceof WeakMap ||
+        obj instanceof WeakSet || 
+        (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
+        obj.constructor?.name?.includes('Request') ||
+        obj.constructor?.name?.includes('Response') ||
+        obj.constructor?.name?.includes('Element') ||
+        obj.constructor?.name?.includes('HTML') ||
+        obj.constructor?.name?.includes('SVG') ||
+        obj.nodeType !== undefined || // DOM nodes
+        obj.window !== undefined || // Window objects
+        typeof obj.then === 'function' || // Promises and thenables
+        obj.constructor?.name?.includes('Stream') // Streams
+      ) {
+      return null; // Return null to completely avoid serialization
+    }
+    
+    // Handle Arrays
+    if (Array.isArray(obj)) {
+      const cleaned = obj.map(item => serializeForApper(item, visited))
+                        .filter(item => item !== null && item !== undefined);
+      visited.delete(obj);
+      return cleaned;
+    }
+    
+    // Handle plain objects - only process enumerable own properties
+    const result = {};
+    
+    try {
+      // Use Object.entries for better safety
+      for (const [key, value] of Object.entries(obj)) {
+        // Skip non-string keys
+        if (typeof key !== 'string') continue;
+        
+        const serializedValue = serializeForApper(value, visited);
+        if (serializedValue !== null && serializedValue !== undefined) {
+          result[key] = serializedValue;
+        }
+      }
+    } catch (error) {
+      console.warn('Error during object serialization:', error);
+      visited.delete(obj);
+      return null;
+    }
+    
     visited.delete(obj);
-    return null;
+    return result;
+  } catch (error) {
+    console.error('Critical serialization error:', error);
+    return null; // Return null instead of error object
   }
-  
-  visited.delete(obj);
-  return result;
 }
 
 // Enhanced validation for serialized data with comprehensive checks
@@ -107,12 +124,18 @@ function validateSerializedData(data) {
         return typeof obj !== 'function' && typeof obj !== 'symbol' && typeof obj !== 'undefined';
       }
       
-      // Check for problematic object types
-      if (obj instanceof Request || obj instanceof Response || 
-          obj instanceof FormData || obj instanceof File || 
-          obj instanceof Blob || obj instanceof Error ||
+// Check for problematic object types
+      if ((typeof Request !== 'undefined' && obj instanceof Request) || 
+          (typeof Response !== 'undefined' && obj instanceof Response) || 
+          (typeof FormData !== 'undefined' && obj instanceof FormData) || 
+          (typeof File !== 'undefined' && obj instanceof File) || 
+          (typeof Blob !== 'undefined' && obj instanceof Blob) || 
+          obj instanceof Error ||
+          (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) || 
+          (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
           obj.constructor?.name?.includes('Request') ||
           obj.constructor?.name?.includes('Response') ||
+          obj.constructor?.name?.includes('Stream') ||
           obj.nodeType !== undefined) {
         return false;
       }
@@ -131,7 +154,7 @@ function validateSerializedData(data) {
       } catch (error) {
         return false;
       }
-};
+    };
     
     return validateDeep(parsed);
   } catch (error) {
@@ -140,18 +163,45 @@ function validateSerializedData(data) {
   }
 }
 
-// Safe postMessage wrapper
+// Enhanced safe postMessage wrapper with comprehensive error handling
 function safePostMessage(targetWindow, data, targetOrigin = '*') {
   try {
-    // Final validation before sending
-    if (!validateSerializedData(data)) {
-      throw new Error('Data failed final validation before postMessage');
+    // First serialize the data
+    const serializedData = serializeForApper(data);
+    
+    // Validate serialized data
+    if (!validateSerializedData(serializedData)) {
+      console.warn('Data failed validation before postMessage');
+      return false;
     }
     
-    targetWindow.postMessage(data, targetOrigin);
+    // Final JSON test
+    const testSerialization = JSON.stringify(serializedData);
+    if (testSerialization === undefined) {
+      console.warn('Final JSON serialization failed');
+      return false;
+    }
+    
+    targetWindow.postMessage(serializedData, targetOrigin);
     return true;
   } catch (error) {
     console.error('SafePostMessage failed:', error);
+    
+    // Handle specific DataCloneError
+    if (error.name === 'DataCloneError' || error.message.includes('DataCloneError')) {
+      console.error('DataCloneError detected - attempting minimal fallback');
+      try {
+        // Send minimal error notification
+        targetWindow.postMessage({
+          type: 'SERIALIZATION_ERROR',
+          error: 'DataCloneError',
+          timestamp: Date.now()
+        }, targetOrigin);
+      } catch (fallbackError) {
+        console.error('Even minimal fallback failed:', fallbackError);
+      }
+    }
+    
     return false;
   }
 }
@@ -265,13 +315,13 @@ if (window.Apper) {
           const apperNotificationData = serializeForApper({
             type: 'config_saved',
             data: {
-              id: savedConfig?.id,
-              name: savedConfig?.name,
-              bucketName: savedConfig?.bucketName,
-              region: savedConfig?.region,
-              isActive: savedConfig?.isActive
+              id: String(savedConfig?.id || ''),
+              name: String(savedConfig?.name || ''),
+              bucketName: String(savedConfig?.bucketName || ''),
+              region: String(savedConfig?.region || ''),
+              isActive: Boolean(savedConfig?.isActive)
             },
-            timestamp: new Date().toISOString()
+            timestamp: Date.now()
           });
           
           // Enhanced validation
@@ -289,7 +339,7 @@ if (window.Apper) {
               type: 'config_saved',
               status: 'success',
               configId: String(savedConfig?.id || 'unknown'),
-              timestamp: Date.now() // Use number instead of ISO string
+              timestamp: Date.now()
             };
             
             window.Apper.sendNotification(fallbackData);
