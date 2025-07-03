@@ -4,6 +4,7 @@ import { toast } from "react-toastify";
 import ApperIcon from "@/components/ApperIcon";
 import ProgressBar from "@/components/atoms/ProgressBar";
 import Button from "@/components/atoms/Button";
+import Error from "@/components/ui/Error";
 import s3Service from "@/services/api/s3Service";
 
 // Simple notification helper
@@ -24,16 +25,133 @@ function notifyParent(data) {
 }
 
 const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) => {
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [uploadTasks, setUploadTasks] = useState([])
-  const [isUploading, setIsUploading] = useState(false)
-  const fileInputRef = useRef(null)
+  // State management
+  const [uploadTasks, setUploadTasks] = useState([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  
+  // Refs
+  const fileInputRef = useRef(null);
 
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    setIsDragOver(true)
+  // Helper function to safely serialize objects for postMessage
+  function serializeObject(obj, visited = new WeakSet()) {
+    if (obj === null || typeof obj !== 'object') {
+      return obj;
+    }
+    
+    // Prevent circular references
+    if (visited.has(obj)) {
+      return '[Circular Reference]';
+    }
+    visited.add(obj);
+    
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.map(item => serializeObject(item, visited));
+    }
+// Handle all non-cloneable objects that would cause DataCloneError
+    if ((typeof window !== 'undefined' && typeof window.Request !== 'undefined' && obj instanceof window.Request) || 
+        (typeof window !== 'undefined' && typeof window.Response !== 'undefined' && obj instanceof window.Response) || 
+        (typeof window !== 'undefined' && typeof window.File !== 'undefined' && obj instanceof window.File) || 
+        (typeof Blob !== 'undefined' && obj instanceof Blob) ||
+        (typeof Map !== 'undefined' && obj instanceof Map) ||
+        (typeof Set !== 'undefined' && obj instanceof Set) ||
+        (typeof WeakMap !== 'undefined' && obj instanceof WeakMap) ||
+        (typeof WeakSet !== 'undefined' && obj instanceof WeakSet) ||
+        (typeof Symbol !== 'undefined' && typeof obj === 'symbol') ||
+        (typeof BigInt !== 'undefined' && typeof obj === 'bigint') ||
+        typeof obj === 'function' || 
+        obj instanceof Error ||
+        obj instanceof RegExp ||
+        (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) ||
+        (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
+        (typeof DataView !== 'undefined' && obj instanceof DataView) ||
+        (obj && typeof obj.constructor === 'function' && obj.constructor.name && 
+         ['HTMLElement', 'Element', 'Node', 'Window', 'Document'].includes(obj.constructor.name))) {
+      
+      // Create safe representation
+      const safeObj = {
+        type: obj.constructor?.name || typeof obj,
+        toString: '[Non-serializable Object]'
+      };
+      
+      // Add specific handling for different types
+try {
+        if (typeof window !== 'undefined' && typeof window.File !== 'undefined' && obj instanceof window.File) {
+          safeObj.name = obj.name;
+          safeObj.size = obj.size;
+          safeObj.type = obj.type;
+          safeObj.lastModified = obj.lastModified;
+        } else if (obj instanceof Error) {
+          safeObj.message = obj.message;
+          safeObj.stack = obj.stack;
+          safeObj.name = obj.name;
+        } else if (obj.toString && typeof obj.toString === 'function') {
+          safeObj.toString = obj.toString();
+        }
+      } catch (error) {
+        safeObj.toString = '[Unserializable]';
+      }
+      
+      return safeObj;
+    }
+    
+    // Handle Date objects
+    if (obj instanceof Date) {
+      return obj.toISOString();
+    }
+    
+    // Handle regular objects
+    const result = {};
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        try {
+          result[key] = serializeObject(obj[key], visited);
+        } catch (error) {
+          result[key] = '[Unserializable]';
+        }
+      }
+    }
+    
+    return result;
   }
 
+// Send notification to parent window with comprehensive error handling
+  function notifyParentLocal(data) {
+    try {
+      const serializedData = serializeObject(data);
+      
+      // Additional safety check before postMessage
+      if (typeof serializedData !== 'object' || serializedData === null) {
+        console.warn('Invalid data for postMessage:', serializedData);
+        return;
+      }
+      
+      if (window.parent && window.parent.postMessage) {
+        window.parent.postMessage(serializedData, '*');
+      }
+    } catch (error) {
+      console.error('Failed to notify parent:', error);
+      
+      // Fallback: send minimal safe data
+      try {
+        if (window.parent && window.parent.postMessage) {
+          window.parent.postMessage({
+            type: 'error',
+            message: 'Failed to serialize upload data',
+            timestamp: new Date().toISOString()
+          }, '*');
+        }
+      } catch (fallbackError) {
+        console.error('Even fallback postMessage failed:', fallbackError);
+      }
+    }
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
   const handleDragLeave = (e) => {
     e.preventDefault()
     setIsDragOver(false)
@@ -93,11 +211,11 @@ const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) =>
           
           toast.success(`Successfully uploaded ${file.name}`)
 
-          notifyParent({
+notifyParentLocal({
             type: 'file_upload_complete',
             status: 'success',
             message: `Uploaded ${file.name}`
-          })
+          });
 
         } catch (error) {
           setUploadTasks(prev => prev.map(t => 
@@ -108,11 +226,11 @@ const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) =>
           
           toast.error(`Failed to upload ${file.name}: ${error.message}`)
 
-          notifyParent({
+notifyParentLocal({
             type: 'file_upload_failed',
             status: 'error',
             message: `Failed to upload ${file.name}`
-          })
+          });
         }
 
         return task
@@ -160,11 +278,11 @@ const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) =>
       
       toast.success(`Successfully uploaded ${task.file.name}`)
 
-      notifyParent({
+notifyParentLocal({
         type: 'file_upload_complete',
         status: 'success',
         message: `Uploaded ${task.file.name}`
-      })
+      });
 
     } catch (error) {
       setUploadTasks(prev => prev.map(t => 

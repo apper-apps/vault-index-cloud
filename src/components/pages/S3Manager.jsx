@@ -41,15 +41,27 @@ const S3Manager = () => {
 const handleUploadComplete = () => {
     // Refresh file browser if it's the active tab
     if (activeTab === 'browser') {
-      window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+      try {
+        window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+      } catch (error) {
+        console.error('Failed to dispatch refresh event:', error)
+        // Fallback: force page refresh if custom event fails
+        window.location.reload()
+      }
     }
     // Force a reload of the active config to ensure consistency
     loadActiveConfig()
   }
 
   const handleRefresh = () => {
-    // Trigger refresh for file browser
-    window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+    // Trigger refresh for file browser with error handling
+    try {
+      window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+    } catch (error) {
+      console.error('Failed to dispatch refresh event:', error)
+      // Fallback: force page refresh if custom event fails
+      window.location.reload()
+    }
   }
 
   if (loading) {

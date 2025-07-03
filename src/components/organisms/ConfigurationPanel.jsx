@@ -9,39 +9,37 @@ import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
-// Simple notification helper that only sends primitive data
+// Send notification to parent window with comprehensive error handling
 function notifyParent(data) {
   if (window.parent && window.parent.postMessage) {
     try {
-      // Deep serialize data to handle complex objects and prevent DataCloneError
-      const safeData = deepSerialize({
-        type: typeof data?.type === 'string' ? data.type : 'notification',
-        status: typeof data?.status === 'string' ? data.status : 'info',
-        message: typeof data?.message === 'string' ? data.message : '',
-        timestamp: Date.now(),
-        // Include any additional safe data from the original object
-        ...(data && typeof data === 'object' ? serializeObject(data) : {})
-      });
+      const serializedData = deepSerialize(data);
       
-      window.parent.postMessage(safeData, '*');
+      // Additional safety check before postMessage
+      if (typeof serializedData !== 'object' || serializedData === null) {
+        console.warn('Invalid data for postMessage:', serializedData);
+        return;
+      }
+      
+      window.parent.postMessage(serializedData, '*');
     } catch (error) {
-      console.warn('Failed to notify parent:', error);
-      // Fallback with minimal safe data
+      console.error('Failed to notify parent:', error);
+      
+      // Fallback: send minimal safe data
       try {
         window.parent.postMessage({
-          type: 'notification',
-          status: 'error',
-          message: 'Communication error occurred',
-          timestamp: Date.now()
+          type: 'error',
+          message: 'Failed to serialize data',
+          timestamp: new Date().toISOString()
         }, '*');
       } catch (fallbackError) {
-        console.error('Complete postMessage failure:', fallbackError);
+        console.error('Even fallback postMessage failed:', fallbackError);
       }
     }
   }
 }
 
-// Helper function to safely serialize objects
+// Helper function to safely serialize objects for postMessage
 function serializeObject(obj, visited = new WeakSet()) {
   if (obj === null || typeof obj !== 'object') {
     return obj;
@@ -57,17 +55,59 @@ function serializeObject(obj, visited = new WeakSet()) {
   if (Array.isArray(obj)) {
     return obj.map(item => serializeObject(item, visited));
   }
-// Handle special objects that can't be cloned
+  
+  // Handle all non-cloneable objects that would cause DataCloneError
   if ((typeof Request !== 'undefined' && obj instanceof Request) || 
       (typeof Response !== 'undefined' && obj instanceof Response) || 
       (typeof File !== 'undefined' && obj instanceof File) || 
       (typeof Blob !== 'undefined' && obj instanceof Blob) ||
-      typeof obj === 'function' || obj instanceof Error) {
-    return {
-      type: obj.constructor.name,
-      toString: obj.toString ? obj.toString() : '[Object]'
+      (typeof Map !== 'undefined' && obj instanceof Map) ||
+      (typeof Set !== 'undefined' && obj instanceof Set) ||
+      (typeof WeakMap !== 'undefined' && obj instanceof WeakMap) ||
+      (typeof WeakSet !== 'undefined' && obj instanceof WeakSet) ||
+      (typeof Symbol !== 'undefined' && typeof obj === 'symbol') ||
+      (typeof BigInt !== 'undefined' && typeof obj === 'bigint') ||
+      typeof obj === 'function' || 
+      obj instanceof Error ||
+      obj instanceof RegExp ||
+      (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) ||
+      (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
+      (typeof DataView !== 'undefined' && obj instanceof DataView) ||
+      (obj && typeof obj.constructor === 'function' && obj.constructor.name && 
+       ['HTMLElement', 'Element', 'Node', 'Window', 'Document'].includes(obj.constructor.name))) {
+    
+    // Create safe representation
+    const safeObj = {
+      type: obj.constructor?.name || typeof obj,
+      toString: '[Non-serializable Object]'
     };
+    
+    // Add specific handling for different types
+    try {
+      if (obj instanceof Map) {
+        safeObj.entries = Array.from(obj.entries()).map(([k, v]) => [
+          serializeObject(k, visited), 
+          serializeObject(v, visited)
+        ]);
+      } else if (obj instanceof Set) {
+        safeObj.values = Array.from(obj).map(v => serializeObject(v, visited));
+      } else if (obj instanceof Error) {
+        safeObj.message = obj.message;
+        safeObj.stack = obj.stack;
+        safeObj.name = obj.name;
+      } else if (obj instanceof RegExp) {
+        safeObj.source = obj.source;
+        safeObj.flags = obj.flags;
+      } else if (obj.toString && typeof obj.toString === 'function') {
+        safeObj.toString = obj.toString();
+      }
+    } catch (error) {
+      safeObj.toString = '[Unserializable]';
+    }
+    
+    return safeObj;
   }
+  
   // Handle Date objects
   if (obj instanceof Date) {
     return obj.toISOString();
