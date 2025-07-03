@@ -25,9 +25,8 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
     // Handle circular references
     if (visited.has(obj)) {
       return '[Circular Reference]';
-    }
+}
     visited.add(obj);
-visited.add(obj);
     
     // Handle specific problematic types comprehensively
     if (typeof Request !== 'undefined' && obj instanceof Request) {
@@ -99,9 +98,10 @@ visited.add(obj);
         className: obj.className
       };
     }
-    // Handle other non-cloneable objects
+// Handle other non-cloneable objects
     if (obj instanceof RegExp) {
       return { __type: 'RegExp', pattern: obj.source, flags: obj.flags };
+    }
     
     if (obj instanceof Map) {
       return { __type: 'Map', entries: Array.from(obj.entries()) };
