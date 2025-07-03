@@ -4,7 +4,6 @@ import { ToastContainer } from "react-toastify";
 import React, { useEffect, useState } from "react";
 import ErrorComponent from "@/components/ui/Error";
 import S3Manager from "@/components/pages/S3Manager";
-
 // Enhanced safe serialization function to handle complex objects and prevent DataCloneError
 function safeSerialize(data, visited = new WeakSet()) {
 try {
@@ -133,16 +132,21 @@ function safePostMessage(targetWindow, data, targetOrigin = "*") {
   }
   
   try {
+    console.log('Attempting to send postMessage with data:', typeof data, data);
     const serializedData = safeSerialize(data);
     
     // Additional validation to ensure data is truly serializable
     const testSerialization = JSON.stringify(serializedData);
-    JSON.parse(testSerialization); // This will throw if there are issues
+JSON.parse(testSerialization); // This will throw if there are issues
     
+    console.log('Sending serialized data via postMessage:', serializedData);
     targetWindow.postMessage(serializedData, targetOrigin);
+    console.log('PostMessage sent successfully');
     return true;
   } catch (error) {
     console.error('Failed to send message via postMessage:', error);
+    console.error('Original data type:', typeof data);
+    console.error('Serialization attempt result:', typeof serializedData);
     
     // Fallback: send minimal safe data
     try {
@@ -351,9 +355,9 @@ function App() {
       delete window.safeSerialize;
       window.removeEventListener('message', handlePostMessageError);
     };
-  }, []);
+}, []);
 
-if (apperError) {
+  if (apperError) {
     return <ErrorComponent message={`Apper initialization failed: ${apperError.message || apperError}`} />;
   }
 

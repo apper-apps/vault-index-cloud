@@ -159,7 +159,56 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
   }
 }
 
-// Validation function to ensure data is safe for postMessage
+// Enhanced validation function to check if data is safely serializable
+function validateSerializedData(data) {
+  try {
+    // Test if the data can be JSON serialized/deserialized
+    const jsonString = JSON.stringify(data);
+    JSON.parse(jsonString);
+    
+    // Additional checks for problematic types
+    const checkForProblematicTypes = (obj, visited = new WeakSet()) => {
+      if (obj === null || obj === undefined || typeof obj !== 'object') {
+        return true;
+      }
+      
+      if (visited.has(obj)) {
+        return false; // Circular reference detected
+      }
+      visited.add(obj);
+      
+      // Check for non-cloneable types
+      if (obj instanceof Request || obj instanceof Response || 
+          obj instanceof Promise || typeof obj === 'function' ||
+          obj instanceof Error || obj instanceof File ||
+          obj instanceof Blob || obj instanceof Element ||
+          obj instanceof RegExp || obj instanceof Map ||
+          obj instanceof Set || obj instanceof ArrayBuffer ||
+          obj instanceof DataView) {
+        return false;
+      }
+      
+      if (Array.isArray(obj)) {
+        return obj.every(item => checkForProblematicTypes(item, visited));
+      }
+      
+      for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+          if (!checkForProblematicTypes(obj[key], visited)) {
+            return false;
+          }
+        }
+      }
+      
+      return true;
+    };
+    
+    return checkForProblematicTypes(data);
+  } catch (error) {
+    console.warn('Data validation failed:', error);
+    return false;
+  }
+}
 const validateSerializedData = (data) => {
   try {
     // Test JSON serialization

@@ -129,13 +129,57 @@ const handleFileUpload = async (files) => {
 
     try {
       // Use global safePostMessage if available
-      if (window.safePostMessage) {
-        window.safePostMessage(window.parent, data, '*')
-      } else if (window.safeSerialize) {
-        const serializedData = window.safeSerialize(data)
-        window.parent.postMessage(serializedData, '*')
-      } else {
-        window.parent.postMessage(data, '*')
+try {
+        // First try to use global safe functions if available
+        if (window.safePostMessage && window.parent) {
+          const success = window.safePostMessage(window.parent, data, '*');
+          if (success) {
+            console.log('File upload notification sent via safePostMessage');
+            return;
+          }
+        }
+        
+        // Fallback to manual serialization
+        if (window.safeSerialize && window.parent && window.parent.postMessage) {
+          const serializedData = window.safeSerialize(data);
+          
+          // Validate serialization worked
+          try {
+            JSON.stringify(serializedData);
+            window.parent.postMessage(serializedData, '*');
+            console.log('File upload notification sent via manual serialization');
+          } catch (validationError) {
+            console.warn('Serialization validation failed:', validationError);
+            throw validationError;
+          }
+        } else if (window.parent && window.parent.postMessage) {
+          // Last resort: send minimal safe data
+          const safeData = {
+            type: 'file_upload_complete',
+            success: true,
+            timestamp: Date.now(),
+            message: 'File upload completed - detailed data could not be serialized'
+          };
+          window.parent.postMessage(safeData, '*');
+          console.warn('Sent minimal file upload notification due to serialization issues');
+        } else {
+          console.warn('Parent window not available for file upload notification');
+        }
+      } catch (error) {
+        console.error('Failed to send file upload notification:', error);
+        
+        // Final fallback
+        try {
+          if (window.parent && window.parent.postMessage) {
+            window.parent.postMessage({
+              type: 'file_upload_error',
+              error: 'Notification failed',
+              timestamp: Date.now()
+            }, '*');
+          }
+        } catch (finalError) {
+          console.error('Even fallback notification failed:', finalError);
+        }
       }
     } catch (postError) {
       console.warn('Failed to notify parent:', postError)
