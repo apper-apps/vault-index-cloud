@@ -1,9 +1,6 @@
-import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
-import { Upload } from "@aws-sdk/lib-storage";
-import React from "react";
-import Error from "@/components/ui/Error";
-import bucketConfigService from "@/services/api/bucketConfigService";
-
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3'
+import { Upload } from '@aws-sdk/lib-storage'
+import bucketConfigService from '@/services/api/bucketConfigService'
 // Utility function to ensure objects are serializable (prevent DataCloneError)
 const makeSerializable = (obj) => {
   if (obj === null || obj === undefined) return obj

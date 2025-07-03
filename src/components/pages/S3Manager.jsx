@@ -3,12 +3,12 @@ import { motion } from "framer-motion";
 import { toast } from "react-toastify";
 import ApperIcon from "@/components/ApperIcon";
 import ConfigurationPanel from "@/components/organisms/ConfigurationPanel";
-import FileUploader from "@/components/organisms/FileUploader";
 import FileBrowser from "@/components/organisms/FileBrowser";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
 const S3ManagerPage = () => {
   const [activeConfig, setActiveConfig] = useState(null)
+  const [currentPath, setCurrentPath] = useState('')
   const [currentPath, setCurrentPath] = useState('')
   const [activeTab, setActiveTab] = useState('browser')
   const [loading, setLoading] = useState(true)
@@ -29,9 +29,22 @@ const S3ManagerPage = () => {
     }
   }
 
-  const handleConfigSaved = (config) => {
-    setActiveConfig(config)
-    toast.success('Configuration updated successfully!')
+const handleConfigSaved = (config) => {
+    try {
+      // Ensure config is serializable before setting state
+      const cleanConfig = {
+        Id: config?.Id,
+        name: config?.name,
+        bucketName: config?.bucketName,
+        region: config?.region,
+        isActive: config?.isActive
+      }
+      setActiveConfig(cleanConfig)
+      toast.success('Configuration updated successfully!')
+    } catch (err) {
+      console.error('Error handling config save:', err)
+      toast.error('Configuration updated but display may be affected')
+    }
   }
 
   const handlePathChange = (newPath) => {
@@ -41,15 +54,27 @@ const S3ManagerPage = () => {
 const handleUploadComplete = () => {
     // Refresh file browser if it's the active tab
     if (activeTab === 'browser') {
-      window.dispatchEvent(new CustomEvent('refreshFiles'))
+      try {
+        window.dispatchEvent(new CustomEvent('refreshFiles', { 
+          detail: { timestamp: Date.now() } 
+        }))
+      } catch (eventError) {
+        console.error('Failed to dispatch refresh event:', eventError)
+      }
     }
     // Force a reload of the active config to ensure consistency
     loadActiveConfig()
   }
 
   const handleRefresh = () => {
-    // Trigger refresh for file browser
-    window.dispatchEvent(new window.CustomEvent('refreshFiles'))
+    // Trigger refresh for file browser with consistent event creation
+    try {
+      window.dispatchEvent(new CustomEvent('refreshFiles', { 
+        detail: { timestamp: Date.now(), source: 'manual' } 
+      }))
+    } catch (eventError) {
+      console.error('Failed to dispatch refresh event:', eventError)
+    }
   }
 
   if (loading) {

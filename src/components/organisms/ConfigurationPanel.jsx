@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { toast } from 'react-toastify'
-import Input from '@/components/atoms/Input'
-import Button from '@/components/atoms/Button'
-import StatusIndicator from '@/components/molecules/StatusIndicator'
-import Loading from '@/components/ui/Loading'
-import Error from '@/components/ui/Error'
-import bucketConfigService from '@/services/api/bucketConfigService'
-import ApperIcon from '@/components/ApperIcon'
+import React, { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { toast } from "react-toastify";
+import ApperIcon from "@/components/ApperIcon";
+import Input from "@/components/atoms/Input";
+import Button from "@/components/atoms/Button";
+import StatusIndicator from "@/components/molecules/StatusIndicator";
+import Error from "@/components/ui/Error";
+import Loading from "@/components/ui/Loading";
+import bucketConfigService from "@/services/api/bucketConfigService";
 
 const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
   const [configs, setConfigs] = useState([])
@@ -88,13 +88,14 @@ const handleSaveConfig = async () => {
     try {
       const savedConfig = await bucketConfigService.create(formData)
       
-      // Ensure config is serializable for postMessage compatibility
+      // Create completely serializable config for postMessage compatibility
       const serializableConfig = {
         Id: savedConfig.Id,
         name: savedConfig.name,
         bucketName: savedConfig.bucketName,
         region: savedConfig.region,
-        isActive: savedConfig.isActive
+        isActive: savedConfig.isActive,
+        createdAt: savedConfig.createdAt ? new Date(savedConfig.createdAt).toISOString() : null
       }
       
       setConfigs(prev => [...prev, savedConfig])
@@ -108,7 +109,14 @@ const handleSaveConfig = async () => {
       })
       setShowForm(false)
       toast.success('Configuration saved successfully!')
-      onConfigSaved?.(serializableConfig)
+      
+      // Safe callback with error handling
+      try {
+        onConfigSaved?.(serializableConfig)
+      } catch (callbackError) {
+        console.error('Callback error:', callbackError)
+        // Don't throw - config was saved successfully
+      }
     } catch (err) {
       toast.error(err?.message || 'Failed to save configuration')
     }
@@ -118,19 +126,27 @@ const handleSetActive = async (configId) => {
     try {
       const updatedConfig = await bucketConfigService.setActive(configId)
       
-      // Create serializable version for postMessage
+      // Create completely serializable version for postMessage
       const serializableConfig = {
         Id: updatedConfig.Id,
         name: updatedConfig.name,
         bucketName: updatedConfig.bucketName,
         region: updatedConfig.region,
-        isActive: updatedConfig.isActive
+        isActive: updatedConfig.isActive,
+        updatedAt: updatedConfig.updatedAt ? new Date(updatedConfig.updatedAt).toISOString() : null
       }
       
       setActiveConfig(updatedConfig)
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
       toast.success('Configuration activated!')
-      onConfigSaved?.(serializableConfig)
+      
+      // Safe callback with error handling
+      try {
+        onConfigSaved?.(serializableConfig)
+      } catch (callbackError) {
+        console.error('Callback error:', callbackError)
+        // Don't throw - config was activated successfully
+      }
     } catch (err) {
       toast.error(err?.message || 'Failed to activate configuration')
     }
@@ -229,9 +245,8 @@ const handleSetActive = async (configId) => {
                 error={formErrors.secretKey}
                 placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCY..."
                 required
-              />
+/>
             </div>
-</div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
@@ -251,7 +266,7 @@ const handleSetActive = async (configId) => {
                 placeholder="my-s3-bucket"
                 required
               />
-
+            </div>
             <div className="flex gap-3 pt-4">
               <Button
                 onClick={handleTestConnection}
@@ -269,11 +284,10 @@ const handleSetActive = async (configId) => {
               >
                 Save Configuration
               </Button>
-            </div>
+</div>
           </div>
         </motion.div>
       )}
-
       {/* Saved Configurations */}
       {configs.length > 0 && (
         <motion.div
