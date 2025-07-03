@@ -27,6 +27,7 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
       return '[Circular Reference]';
     }
     visited.add(obj);
+visited.add(obj);
     
     // Handle specific problematic types comprehensively
     if (typeof Request !== 'undefined' && obj instanceof Request) {
@@ -81,7 +82,7 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
         lastModified: obj.lastModified
       };
     }
-    if (obj instanceof Blob) {
+    if (typeof Blob !== 'undefined' && obj instanceof Blob) {
       return {
         __type: 'Blob',
         size: obj.size,
@@ -89,7 +90,7 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
       };
     }
     
-// Handle DOM elements
+    // Handle DOM elements
     if (typeof Element !== 'undefined' && obj instanceof Element) {
       return {
         __type: 'Element',
@@ -101,7 +102,6 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
     // Handle other non-cloneable objects
     if (obj instanceof RegExp) {
       return { __type: 'RegExp', pattern: obj.source, flags: obj.flags };
-    }
     
     if (obj instanceof Map) {
       return { __type: 'Map', entries: Array.from(obj.entries()) };
@@ -177,11 +177,13 @@ function validateSerializedData(data) {
       }
       visited.add(obj);
       
-      // Check for non-cloneable types
-      if (obj instanceof Request || obj instanceof Response || 
+// Check for non-cloneable types
+      if ((typeof Request !== 'undefined' && obj instanceof Request) || 
+          (typeof Response !== 'undefined' && obj instanceof Response) || 
           obj instanceof Promise || typeof obj === 'function' ||
-          obj instanceof Error || obj instanceof File ||
-          obj instanceof Blob || obj instanceof Element ||
+          obj instanceof Error || (typeof File !== 'undefined' && obj instanceof File) ||
+          (typeof Blob !== 'undefined' && obj instanceof Blob) || 
+          (typeof Element !== 'undefined' && obj instanceof Element) ||
           obj instanceof RegExp || obj instanceof Map ||
           obj instanceof Set || obj instanceof ArrayBuffer ||
           obj instanceof DataView) {
@@ -205,34 +207,7 @@ function validateSerializedData(data) {
     
     return checkForProblematicTypes(data);
   } catch (error) {
-    console.warn('Data validation failed:', error);
-    return false;
-  }
-}
-const validateSerializedData = (data) => {
-  try {
-    // Test JSON serialization
-    const jsonString = JSON.stringify(data);
-    JSON.parse(jsonString);
-    
-    // Additional checks for problematic patterns
-    const checkForProblematicTypes = (obj) => {
-      if (typeof obj === 'function') return false;
-      if (obj instanceof Promise) return false;
-      if (obj instanceof Error && obj.stack) return false;
-      if (typeof obj === 'object' && obj !== null) {
-        for (const key in obj) {
-          if (obj.hasOwnProperty(key) && !checkForProblematicTypes(obj[key])) {
-            return false;
-          }
-        }
-      }
-      return true;
-    };
-    
-    return checkForProblematicTypes(data);
-  } catch (error) {
-    console.error('Data validation failed:', error);
+console.warn('Data validation failed:', error);
     return false;
   }
 }
