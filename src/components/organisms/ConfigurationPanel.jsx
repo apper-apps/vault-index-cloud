@@ -13,16 +13,90 @@ import bucketConfigService from "@/services/api/bucketConfigService";
 function notifyParent(data) {
   if (window.parent && window.parent.postMessage) {
     try {
-      const safeData = {
-        type: typeof data.type === 'string' ? data.type : 'notification',
-        status: typeof data.status === 'string' ? data.status : 'info',
-        message: typeof data.message === 'string' ? data.message : '',
-        timestamp: Date.now()
-      };
+      // Deep serialize data to handle complex objects and prevent DataCloneError
+      const safeData = deepSerialize({
+        type: typeof data?.type === 'string' ? data.type : 'notification',
+        status: typeof data?.status === 'string' ? data.status : 'info',
+        message: typeof data?.message === 'string' ? data.message : '',
+        timestamp: Date.now(),
+        // Include any additional safe data from the original object
+        ...(data && typeof data === 'object' ? serializeObject(data) : {})
+      });
+      
       window.parent.postMessage(safeData, '*');
     } catch (error) {
       console.warn('Failed to notify parent:', error);
+      // Fallback with minimal safe data
+      try {
+        window.parent.postMessage({
+          type: 'notification',
+          status: 'error',
+          message: 'Communication error occurred',
+          timestamp: Date.now()
+        }, '*');
+      } catch (fallbackError) {
+        console.error('Complete postMessage failure:', fallbackError);
+      }
     }
+  }
+}
+
+// Helper function to safely serialize objects
+function serializeObject(obj, visited = new WeakSet()) {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  
+  // Prevent circular references
+  if (visited.has(obj)) {
+    return '[Circular Reference]';
+  }
+  visited.add(obj);
+  
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeObject(item, visited));
+  }
+// Handle special objects that can't be cloned
+  if ((typeof Request !== 'undefined' && obj instanceof Request) || 
+      (typeof Response !== 'undefined' && obj instanceof Response) || 
+      (typeof File !== 'undefined' && obj instanceof File) || 
+      (typeof Blob !== 'undefined' && obj instanceof Blob) ||
+      typeof obj === 'function' || obj instanceof Error) {
+    return {
+      type: obj.constructor.name,
+      toString: obj.toString ? obj.toString() : '[Object]'
+    };
+  }
+  // Handle Date objects
+  if (obj instanceof Date) {
+    return obj.toISOString();
+  }
+  
+  // Handle regular objects
+  const result = {};
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      try {
+        result[key] = serializeObject(obj[key], visited);
+      } catch (error) {
+        result[key] = '[Unserializable]';
+      }
+    }
+  }
+  
+  return result;
+}
+
+// Deep serialize with additional safety checks
+function deepSerialize(data) {
+  try {
+    // First attempt: JSON round-trip to catch most issues
+    const jsonString = JSON.stringify(data);
+    return JSON.parse(jsonString);
+  } catch (error) {
+    // Fallback: manual serialization
+    return serializeObject(data);
   }
 }
 

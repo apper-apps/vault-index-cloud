@@ -7,25 +7,83 @@ import S3Manager from "@/components/pages/S3Manager";
 
 // Simple postMessage wrapper that only sends basic data types
 function safePostMessage(targetWindow, data, targetOrigin = "*") {
-  if (!targetWindow || !targetWindow.postMessage) {
-    console.warn('Target window not available for postMessage');
-    return false;
+  if (targetWindow && targetWindow.postMessage) {
+    try {
+      // Deep serialize data to handle complex objects and prevent DataCloneError
+      const safeData = deepSerialize(data);
+      targetWindow.postMessage(safeData, targetOrigin);
+    } catch (error) {
+      console.warn('Failed to send message:', error);
+      // Fallback with minimal safe data
+      try {
+        targetWindow.postMessage({
+          type: 'error',
+          message: 'Communication error occurred',
+          timestamp: Date.now()
+        }, targetOrigin);
+      } catch (fallbackError) {
+        console.error('Complete postMessage failure:', fallbackError);
+      }
+    }
+  }
+}
+
+// Helper function to safely serialize objects
+function serializeObject(obj, visited = new WeakSet()) {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
   }
   
-  try {
-    // Only send basic object with primitive types
-    const safeData = {
-      type: typeof data.type === 'string' ? data.type : 'message',
-      message: typeof data.message === 'string' ? data.message : '',
-      status: typeof data.status === 'string' ? data.status : 'info',
-      timestamp: Date.now()
+  // Prevent circular references
+  if (visited.has(obj)) {
+    return '[Circular Reference]';
+  }
+  visited.add(obj);
+  
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => serializeObject(item, visited));
+  }
+  
+  // Handle special objects that can't be cloned
+  if (obj instanceof Request || obj instanceof Response || 
+      obj instanceof File || obj instanceof Blob ||
+      typeof obj === 'function' || obj instanceof Error) {
+    return {
+      type: obj.constructor.name,
+      toString: obj.toString ? obj.toString() : '[Object]'
     };
-    
-    targetWindow.postMessage(safeData, targetOrigin);
-    return true;
+  }
+  
+  // Handle Date objects
+  if (obj instanceof Date) {
+    return obj.toISOString();
+  }
+  
+  // Handle regular objects
+  const result = {};
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      try {
+        result[key] = serializeObject(obj[key], visited);
+      } catch (error) {
+        result[key] = '[Unserializable]';
+      }
+    }
+  }
+  
+  return result;
+}
+
+// Deep serialize with additional safety checks
+function deepSerialize(data) {
+  try {
+    // First attempt: JSON round-trip to catch most issues
+    const jsonString = JSON.stringify(data);
+    return JSON.parse(jsonString);
   } catch (error) {
-    console.error('PostMessage failed:', error);
-    return false;
+    // Fallback: manual serialization
+    return serializeObject(data);
   }
 }
 
