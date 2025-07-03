@@ -5,207 +5,253 @@ import React, { useEffect, useState } from "react";
 import Error from "@/components/ui/Error";
 import S3Manager from "@/components/pages/S3Manager";
 // Helper function to safely serialize data for postMessage - moved outside component
-const safeSerialize = (data) => {
+// Enhanced safe serialization function to handle complex objects and prevent DataCloneError
+function safeSerialize(data, visited = new WeakSet()) {
   try {
-    // Global seen set to track circular references across all levels
-    const seen = new WeakSet()
-    
-    const serialize = (obj) => {
-      if (obj === null || obj === undefined) return obj
-      
-      // Handle primitives first
-      if (typeof obj !== 'object') {
-        if (typeof obj === 'function') return '[Function]'
-        if (typeof obj === 'symbol') return '[Symbol]'
-        if (typeof obj === 'bigint') return obj.toString()
-        return obj
-      }
-      
-      // Check for circular references
-      if (seen.has(obj)) return '[Circular Reference]'
-      seen.add(obj)
-      
-      // Handle built-in objects that can cause DataCloneError
-      if (obj instanceof Error) return { name: obj.name, message: obj.message, stack: obj.stack }
-      if (obj instanceof Date) return obj.toISOString()
-      if (obj instanceof RegExp) return obj.toString()
-      if (obj instanceof File) return { name: obj.name, size: obj.size, type: obj.type, lastModified: obj.lastModified }
-      if (obj instanceof Blob) return { size: obj.size, type: obj.type }
-      
-      // Handle objects that definitely cannot be cloned
-      if (obj instanceof Request || obj instanceof Response) return '[Request/Response Object]'
-      if (obj instanceof Response) return '[Response Object]'
-      if (obj instanceof Promise) return '[Promise Object]'
-      if (obj instanceof WeakMap || obj instanceof WeakSet) return '[WeakMap/WeakSet Object]'
-      if (obj instanceof ArrayBuffer) return '[ArrayBuffer]'
-      if (ArrayBuffer.isView(obj)) return '[TypedArray/DataView]'
-      
-      // Handle DOM objects
-      if (typeof Window !== 'undefined' && obj instanceof Window) return '[Window Object]'
-      if (typeof Document !== 'undefined' && obj instanceof Document) return '[Document Object]'
-      if (typeof Element !== 'undefined' && obj instanceof Element) return '[DOM Element]'
-      if (typeof Node !== 'undefined' && obj instanceof Node) return '[DOM Node]'
-      if (typeof Event !== 'undefined' && obj instanceof Event) return '[Event Object]'
-      
-      // Handle Proxy objects and complex constructors
-      try {
-        if (obj.constructor && obj.constructor.name === 'Object' && Object.getPrototypeOf(obj) !== Object.prototype) {
-          return '[Proxy/Complex Object]'
-        }
-      } catch (e) {
-        return '[Unserializable Object]'
-      }
-      
-      // Handle arrays
-      if (Array.isArray(obj)) {
-        return obj.map(item => {
-          try {
-            return serialize(item)
-          } catch (e) {
-            console.warn('Failed to serialize array item:', e)
-            return '[Unserializable Item]'
-          }
-        })
-      }
-      
-      // Handle plain objects
-      const result = {}
-      try {
-        for (const [key, value] of Object.entries(obj)) {
-          try {
-            result[key] = serialize(value)
-          } catch (e) {
-            console.warn(`Failed to serialize property ${key}:`, e)
-            result[key] = '[Unserializable Property]'
-          }
-        }
-      } catch (e) {
-        return '[Object Enumeration Failed]'
-      }
-      
-      return result
+    // Handle null/undefined
+    if (data === null || data === undefined) {
+      return data;
     }
     
-    const serialized = serialize(data)
-    
-    // Final validation - attempt JSON stringify to ensure it's truly serializable
-    try {
-      JSON.stringify(serialized)
-    } catch (e) {
-      console.warn('Serialized data still not JSON compatible:', e)
-      return { error: 'Final serialization check failed', originalType: typeof data }
+    // Handle primitives
+    if (typeof data !== 'object') {
+      return data;
     }
     
-    return serialized
+    // Handle circular references
+    if (visited.has(data)) {
+      return '[Circular Reference]';
+    }
+    visited.add(data);
+    
+    // Handle specific problematic types
+    if (data instanceof Request) {
+      return {
+        __type: 'Request',
+        url: data.url,
+        method: data.method,
+        headers: Object.fromEntries(data.headers || []),
+        body: '[Request Body]'
+      };
+    }
+    
+    if (data instanceof Response) {
+      return {
+        __type: 'Response',
+        status: data.status,
+        statusText: data.statusText,
+        url: data.url,
+        headers: Object.fromEntries(data.headers || [])
+      };
+    }
+    
+    if (data instanceof Promise) {
+      return { __type: 'Promise', state: 'pending' };
+    }
+    
+    if (typeof data === 'function') {
+      return { __type: 'Function', name: data.name || 'anonymous' };
+    }
+    
+    if (data instanceof Error) {
+      return {
+        __type: 'Error',
+        name: data.name,
+        message: data.message,
+        stack: data.stack
+      };
+    }
+    
+    if (data instanceof Date) {
+      return { __type: 'Date', value: data.toISOString() };
+    }
+    
+    if (data instanceof RegExp) {
+      return { __type: 'RegExp', source: data.source, flags: data.flags };
+    }
+    
+    if (data instanceof File) {
+      return {
+        __type: 'File',
+        name: data.name,
+        size: data.size,
+        type: data.type,
+        lastModified: data.lastModified
+      };
+    }
+    
+    if (data instanceof FormData) {
+      return { __type: 'FormData', entries: Array.from(data.entries()) };
+    }
+    
+    if (data instanceof ArrayBuffer) {
+      return { __type: 'ArrayBuffer', byteLength: data.byteLength };
+    }
+    
+    // Handle arrays
+    if (Array.isArray(data)) {
+      return data.map(item => safeSerialize(item, visited));
+    }
+    
+    // Handle objects
+    const serialized = {};
+    for (const key in data) {
+      if (data.hasOwnProperty(key)) {
+        try {
+serialized[key] = safeSerialize(data[key], visited);
+        } catch (error) {
+          // Skip problematic properties
+          console.warn(`Failed to serialize property ${key}:`, error);
+          serialized[key] = '[Serialization Error]';
+        }
+      }
+    }
+    
+    return serialized;
   } catch (error) {
-    console.warn('Critical serialization failure:', error)
-    return { error: 'Serialization failed', originalType: typeof data, timestamp: new Date().toISOString() }
+    console.error('Serialization error:', error);
+    return '[Serialization Failed]';
   }
 }
 
-// Enhanced postMessage wrapper - globally available
-const safePostMessage = (targetWindow, data, targetOrigin = '*') => {
-  try {
-    const serializedData = safeSerialize(data)
-    targetWindow.postMessage(serializedData, targetOrigin)
-  } catch (error) {
-    console.error('SafePostMessage error:', error)
-    if (error.name === 'DataCloneError') {
-      // Fallback: send minimal error data
-      targetWindow.postMessage({
-        type: 'APPER_DATACLONE_ERROR',
-        error: 'Data contains non-cloneable objects',
-        timestamp: Date.now()
-      }, targetOrigin)
-    }
+// Enhanced safe postMessage wrapper with comprehensive error handling
+function safePostMessage(targetWindow, data, targetOrigin = "*") {
+  if (!targetWindow || !targetWindow.postMessage) {
+    console.warn('Target window not available for postMessage');
+    return false;
   }
+  
+  try {
+    const serializedData = safeSerialize(data);
+    
+    // Additional validation to ensure data is truly serializable
+    const testSerialization = JSON.stringify(serializedData);
+    JSON.parse(testSerialization); // This will throw if there are issues
+    
+    targetWindow.postMessage(serializedData, targetOrigin);
+    return true;
+  } catch (error) {
+    console.error('Failed to send message via postMessage:', error);
+    
+    // Fallback: send minimal safe data
+    try {
+      const fallbackData = {
+        __type: 'FallbackMessage',
+        originalType: typeof data,
+        error: 'Serialization failed',
+        timestamp: Date.now()
+      };
+      targetWindow.postMessage(fallbackData, targetOrigin);
+    } catch (fallbackError) {
+      console.error('Even fallback postMessage failed:', fallbackError);
+    }
+    
+    return false;
+  }
+}
+
+// Enhanced error handler for postMessage events
+function handlePostMessageError(event) {
+  console.error('PostMessage error event:', event);
+  
+  // Log detailed error information
+  if (event.data && event.data.__type === 'FallbackMessage') {
+    console.warn('Received fallback message due to serialization issues');
+  }
+  
+  // Notify user of communication issues
+  if (window.toast) {
+    window.toast.error('Communication error with Apper. Please try again.');
+  }
+}
+
+// Initialize error handling for postMessage
+if (typeof window !== 'undefined') {
+  window.addEventListener('messageerror', handlePostMessageError);
 }
 
 function App() {
-  const [apperReady, setApperReady] = useState(false)
-  const [apperError, setApperError] = useState(null)
+  const [apperReady, setApperReady] = useState(false);
+  const [apperError, setApperError] = useState(null);
 
   useEffect(() => {
-    // Initialize Apper SDK
     const initializeApper = async () => {
       try {
-        // Load Apper SDK script
-        const script = document.createElement('script')
-        script.src = import.meta.env.VITE_APPER_SDK_CDN_URL
-        script.async = true
+        const script = document.createElement('script');
+        script.src = import.meta.env.VITE_APPER_SDK_CDN_URL;
+        script.async = true;
         
         script.onload = async () => {
           try {
             if (window.Apper) {
               await window.Apper.init({
-                integrationId: 'your-integration-id',
+                projectId: import.meta.env.VITE_APPER_PROJECT_ID,
+                publicKey: import.meta.env.VITE_APPER_PUBLIC_KEY,
+                postMessage: (data, targetOrigin) => {
+                  return safePostMessage(window, data, targetOrigin);
+                },
                 onError: (error) => {
-                  console.error('Apper SDK Error:', error)
-                  const safeError = safeSerialize(error)
-                  setApperError(safeError.message || safeError.error || 'Apper initialization failed')
+                  console.error('Apper error:', error);
+                  setApperError(error);
                 },
                 onReady: () => {
-                  console.log('Apper SDK initialized successfully')
-                  setApperReady(true)
-                },
-                // Add postMessage wrapper to ensure safe serialization
-postMessage: (data, targetOrigin) => {
-                  safePostMessage(window, data, targetOrigin)
+                  console.log('Apper SDK initialized successfully');
+                  setApperReady(true);
                 }
-              })
+              });
+            } else {
+              throw new Error('Apper SDK not loaded properly');
             }
           } catch (error) {
-            console.error('Failed to initialize Apper SDK:', error)
-            setApperError(error.message || 'SDK initialization failed')
+            console.error('Apper initialization error:', error);
+            setApperError(error);
           }
-        }
+        };
         
-        script.onerror = () => {
-          setApperError('Failed to load Apper SDK')
-        }
+        script.onerror = (error) => {
+          console.error('Failed to load Apper SDK:', error);
+          setApperError(new Error('Failed to load Apper SDK'));
+        };
         
-        document.head.appendChild(script)
-        
-        // Cleanup function
-        return () => {
-          if (document.head.contains(script)) {
-            document.head.removeChild(script)
-          }
-        }
+        document.head.appendChild(script);
       } catch (error) {
-        console.error('Error initializing Apper:', error)
-        setApperError(error.message)
+        console.error('Error initializing Apper:', error);
+        setApperError(error);
       }
-    }
+    };
 
-    initializeApper()
-  }, [])
-// Add global error handler for postMessage errors
+    initializeApper();
+  }, []);
+
   useEffect(() => {
-const handlePostMessageError = (event) => {
+    const handlePostMessageError = (event) => {
       if (event.data && event.data.type === 'APPER_ERROR') {
-        console.error('Apper postMessage error:', event.data.error)
-        setApperError(event.data.error)
+        console.error('Apper postMessage error:', event.data.error);
+        setApperError(event.data.error);
       } else if (event.data && event.data.type === 'APPER_SERIALIZATION_ERROR') {
-        console.error('Apper serialization error - data could not be cloned')
-        setApperError('Communication error: Data serialization failed')
+        console.error('Apper serialization error - data could not be cloned');
+        setApperError('Communication error: Data serialization failed');
       } else if (event.data && event.data.type === 'APPER_DATACLONE_ERROR') {
-        console.error('DataCloneError detected in postMessage')
-        setApperError('Communication error: Unable to send data to integration service')
+        console.error('DataCloneError detected in postMessage');
+        setApperError('Communication error: Unable to send data to integration service');
       }
-    }
+    };
 
-    // Make safePostMessage available globally for other components
-    window.safePostMessage = safePostMessage
-    window.safeSerialize = safeSerialize
-    window.addEventListener('message', handlePostMessageError)
+    window.safePostMessage = safePostMessage;
+    window.safeSerialize = safeSerialize;
+    window.addEventListener('message', handlePostMessageError);
     
     return () => {
-      delete window.safePostMessage
-      delete window.safeSerialize
-      window.removeEventListener('message', handlePostMessageError)
-    }
-  }, []) // Fixed dependency array - no longer depends on safeSerialize since it's outside component
+      delete window.safePostMessage;
+      delete window.safeSerialize;
+      window.removeEventListener('message', handlePostMessageError);
+    };
+  }, []);
+
+  if (apperError) {
+    return <Error message={`Apper initialization failed: ${apperError.message || apperError}`} />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-aws-gray via-white to-gray-50">
       {apperError && (
@@ -232,7 +278,7 @@ const handlePostMessageError = (event) => {
         style={{ zIndex: 9999 }}
       />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

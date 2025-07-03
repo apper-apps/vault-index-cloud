@@ -9,83 +9,94 @@ import Error from "@/components/ui/Error";
 import Loading from "@/components/ui/Loading";
 import bucketConfigService from "@/services/api/bucketConfigService";
 // Enhanced serialization for Apper SDK with comprehensive DataCloneError prevention
-const serializeForApper = (obj) => {
-  // Use global safeSerialize if available, otherwise fallback to local implementation
-  if (window.safeSerialize) {
-    return window.safeSerialize(obj)
-  }
-  
+const serializeForApper = (obj, visited = new WeakSet()) => {
   try {
-    if (obj === null || obj === undefined) return obj
+    // Handle null/undefined
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
     
-    const seen = new WeakSet()
+    // Handle primitives
+    if (typeof obj !== 'object') {
+      return obj;
+    }
     
-    const serialize = (item) => {
-      if (item === null || item === undefined) return item
-      
-      if (typeof item !== 'object') {
-        if (typeof item === 'function') return '[Function]'
-        if (typeof item === 'symbol') return '[Symbol]'
-        if (typeof item === 'bigint') return item.toString()
-        return item
-      }
-      
-      if (seen.has(item)) return '[Circular Reference]'
-      seen.add(item)
-      
-      // Handle problematic objects that cause DataCloneError
-      if (item instanceof Request || item instanceof Response) return '[Request/Response Object]'
-      if (item instanceof Promise) return '[Promise Object]'
-      if (item instanceof WeakMap || item instanceof WeakSet) return '[WeakMap/WeakSet Object]'
-      if (item instanceof ArrayBuffer) return '[ArrayBuffer]'
-      if (ArrayBuffer.isView(item)) return '[TypedArray/DataView]'
-      
-      if (item instanceof Date) return item.toISOString()
-      if (item instanceof Error) return { name: item.name, message: item.message, stack: item.stack }
-      if (item instanceof File) return { name: item.name, size: item.size, type: item.type, lastModified: item.lastModified }
-      if (item instanceof Blob) return { size: item.size, type: item.type }
-      
-      if (Array.isArray(item)) {
-        return item.map(subItem => {
-          try {
-            return serialize(subItem)
-          } catch (e) {
-            console.warn('Failed to serialize array item:', e)
-            return '[Unserializable Item]'
-          }
-        })
-      }
-      
-      const result = {}
-      try {
-        for (const [key, value] of Object.entries(item)) {
-          try {
-            result[key] = serialize(value)
-          } catch (e) {
-            console.warn(`Failed to serialize property ${key}:`, e)
-            result[key] = '[Unserializable Property]'
-          }
+    // Handle circular references
+    if (visited.has(obj)) {
+      return '[Circular Reference]';
+    }
+    visited.add(obj);
+    
+    // Handle specific problematic types
+    if (obj instanceof Request) {
+      return {
+        __type: 'Request',
+        url: obj.url,
+        method: obj.method,
+        headers: Object.fromEntries(obj.headers || [])
+      };
+    }
+    
+    if (obj instanceof Response) {
+      return {
+        __type: 'Response',
+        status: obj.status,
+        statusText: obj.statusText,
+        url: obj.url
+      };
+    }
+    
+    if (obj instanceof Promise) {
+      return { __type: 'Promise', state: 'pending' };
+    }
+    
+    if (typeof obj === 'function') {
+      return { __type: 'Function', name: obj.name || 'anonymous' };
+    }
+    
+    if (obj instanceof Error) {
+      return {
+        __type: 'Error',
+        name: obj.name,
+        message: obj.message
+      };
+    }
+    
+    if (obj instanceof Date) {
+      return { __type: 'Date', value: obj.toISOString() };
+    }
+    
+    if (obj instanceof File) {
+      return {
+        __type: 'File',
+        name: obj.name,
+        size: obj.size,
+        type: obj.type
+      };
+    }
+    
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.map(item => serializeForApper(item, visited));
+    }
+    
+    // Handle objects - create a clean copy
+    const serialized = {};
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        try {
+          serialized[key] = serializeForApper(obj[key], visited);
+        } catch (error) {
+          console.warn(`Failed to serialize property ${key}:`, error);
+          serialized[key] = '[Serialization Error]';
         }
-      } catch (e) {
-        return '[Object Enumeration Failed]'
       }
-      return result
     }
     
-    const serialized = serialize(obj)
-    
-    // Final validation
-    try {
-      JSON.stringify(serialized)
-    } catch (e) {
-      console.warn('Serialized data still not JSON compatible:', e)
-      return { error: 'Final serialization check failed', originalType: typeof obj }
-    }
-    
-    return serialized
+    return serialized;
   } catch (error) {
-    console.warn('Critical serialization failure:', error)
-    return { error: 'Serialization failed', originalType: typeof obj, timestamp: new Date().toISOString() }
+    console.error('Apper serialization error:', error);
+    return { error: 'Serialization failed', originalType: typeof obj };
   }
 }
 
@@ -175,23 +186,52 @@ const handleTestConnection = async () => {
       setTesting(false)
     }
   }
-
-  const handleSaveConfig = async () => {
+const handleSaveConfig = async () => {
     if (!validateForm()) return
     
     try {
-      // Serialize callback data for Apper SDK
-      const serializedFormData = serializeForApper({
-        name: formData.name?.trim(),
-        accessKey: formData.accessKey?.trim(),
-        secretKey: formData.secretKey?.trim(),
-        region: formData.region?.trim(),
-        bucketName: formData.bucketName?.trim(),
-        timestamp: new Date().toISOString()
-      })
-
-      const savedConfig = await bucketConfigService.create(serializedFormData)
-      await loadConfigs()
+      const configData = {
+        name: formData.name.trim(),
+        accessKey: formData.accessKey.trim(),
+        secretKey: formData.secretKey.trim(),
+        region: formData.region.trim(),
+        bucketName: formData.bucketName.trim()
+      }
+      
+      const savedConfig = await bucketConfigService.save(configData)
+      
+      // Update local state
+      setConfigs(prev => [...prev, savedConfig])
+      
+      // Send notification to Apper if available with enhanced error handling
+      if (window.Apper) {
+        try {
+          const apperNotificationData = serializeForApper({
+            type: 'config_saved',
+            data: savedConfig,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Validate serialization worked
+          const testSerialization = JSON.stringify(apperNotificationData);
+          JSON.parse(testSerialization);
+          
+          window.Apper.sendNotification(apperNotificationData);
+        } catch (error) {
+          console.error('Failed to send Apper notification:', error);
+          
+          // Send minimal fallback notification
+          try {
+            window.Apper.sendNotification({
+              type: 'config_saved',
+              status: 'success',
+              timestamp: new Date().toISOString()
+            });
+          } catch (fallbackError) {
+            console.error('Even fallback Apper notification failed:', fallbackError);
+          }
+        }
+      }
       
       // Reset form and hide it
       setFormData({
@@ -212,8 +252,7 @@ const handleTestConnection = async () => {
             name: savedConfig.name,
             bucketName: savedConfig.bucketName,
             region: savedConfig.region,
-            isActive: savedConfig.isActive,
-            createdAt: savedConfig.createdAt
+            savedAt: new Date().toISOString()
           }
         })
         
@@ -324,8 +363,7 @@ const handleSetActive = async (configId) => {
       toast.error(err.message || 'Failed to activate configuration')
     }
   }
-
-  const handleDeleteConfig = async (configId) => {
+const handleDeleteConfig = async (configId) => {
     if (!window.confirm('Are you sure you want to delete this configuration?')) return
     
     try {
@@ -334,6 +372,37 @@ const handleSetActive = async (configId) => {
       if (activeConfig?.Id === configId) {
         setActiveConfig(null)
       }
+      
+      // Send notification to Apper if available with enhanced error handling
+      if (window.Apper) {
+        try {
+          const serializedConfig = serializeForApper({
+            type: 'config_deleted',
+            configId: configId,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Validate serialization worked
+          const testSerialization = JSON.stringify(serializedConfig);
+          JSON.parse(testSerialization);
+          
+          window.Apper.sendNotification(serializedConfig);
+        } catch (error) {
+          console.error('Failed to send Apper deletion notification:', error);
+          
+          // Send minimal fallback notification
+          try {
+            window.Apper.sendNotification({
+              type: 'config_deleted',
+              configId: configId,
+              timestamp: new Date().toISOString()
+            });
+          } catch (fallbackError) {
+            console.error('Even fallback Apper deletion notification failed:', fallbackError);
+          }
+        }
+      }
+      
       toast.success('Configuration deleted!')
     } catch (err) {
       toast.error(err.message)
