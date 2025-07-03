@@ -1,5 +1,4 @@
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Upload } from '@aws-sdk/lib-storage'
 import bucketConfigService from '@/services/api/bucketConfigService'
 
@@ -90,12 +89,13 @@ class S3Service {
     }
   }
 
-async uploadFile(file, path = '', progressCallback) {
+  async uploadFile(file, path = '', progressCallback) {
     try {
       await this.ensureClient()
       
       const key = path ? `${path}/${file.name}` : file.name
       const startTime = Date.now()
+      let lastLoaded = 0
       
       const upload = new Upload({
         client: this.s3Client,
@@ -103,7 +103,7 @@ async uploadFile(file, path = '', progressCallback) {
           Bucket: this.bucketName,
           Key: key,
           Body: file,
-          ContentType: file.type || 'application/octet-stream'
+          ContentType: file.type
         }
       })
 
@@ -113,20 +113,18 @@ async uploadFile(file, path = '', progressCallback) {
           const total = progress.total || file.size
           const percentage = (loaded / total) * 100
           
+          // Calculate speed
           const elapsed = (Date.now() - startTime) / 1000
-          const mbPerSecond = elapsed > 0 ? (loaded / (1024 * 1024)) / elapsed : 0
+          const bytesPerSecond = elapsed > 0 ? (loaded - lastLoaded) / elapsed : 0
+          const mbPerSecond = bytesPerSecond / (1024 * 1024)
           
+          lastLoaded = loaded
           progressCallback(percentage, mbPerSecond)
         }
       })
 
-      const result = await upload.done()
-      return { 
-        key: key, 
-        size: file.size, 
-        type: file.type || 'application/octet-stream',
-        etag: result.ETag
-      }
+      await upload.done()
+      return { key, size: file.size, type: file.type }
     } catch (error) {
       throw new Error(`Failed to upload file: ${error.message}`)
     }
@@ -311,43 +309,9 @@ async uploadFile(file, path = '', progressCallback) {
     
     const parts = this.currentPath.split('/')
     return parts.map((part, index) => ({
-name: part,
+      name: part,
       path: parts.slice(0, index + 1).join('/')
     }))
-  }
-
-  async getFilePreviewUrl(fileKey) {
-    try {
-      await this.ensureClient()
-      
-      const command = new GetObjectCommand({
-        Bucket: this.bucketName,
-        Key: fileKey
-      })
-
-      // Generate presigned URL valid for 1 hour
-      const url = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 })
-      return url
-    } catch (error) {
-      throw new Error(`Failed to generate preview URL: ${error.message}`)
-    }
-  }
-
-  async generateShareUrl(fileKey, expiresInSeconds = 3600) {
-    try {
-      await this.ensureClient()
-      
-      const command = new GetObjectCommand({
-        Bucket: this.bucketName,
-        Key: fileKey
-      })
-
-      // Generate presigned URL with custom expiration
-      const url = await getSignedUrl(this.s3Client, command, { expiresIn: expiresInSeconds })
-      return url
-    } catch (error) {
-      throw new Error(`Failed to generate share URL: ${error.message}`)
-    }
   }
 }
 export default new S3Service()

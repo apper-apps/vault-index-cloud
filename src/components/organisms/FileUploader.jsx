@@ -1,157 +1,22 @@
-import React, { useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { toast } from "react-toastify";
-import ApperIcon from "@/components/ApperIcon";
-import ProgressBar from "@/components/atoms/ProgressBar";
-import Button from "@/components/atoms/Button";
-import Error from "@/components/ui/Error";
-import s3Service from "@/services/api/s3Service";
-
-// Simple notification helper
-function notifyParent(data) {
-  if (window.parent && window.parent.postMessage) {
-    try {
-      const safeData = {
-        type: typeof data.type === 'string' ? data.type : 'upload',
-        status: typeof data.status === 'string' ? data.status : 'info',
-        message: typeof data.message === 'string' ? data.message : '',
-        timestamp: Date.now()
-      };
-      window.parent.postMessage(safeData, '*');
-    } catch (error) {
-      console.warn('Failed to notify parent:', error);
-    }
-  }
-}
+import { useState, useRef } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { toast } from 'react-toastify'
+import Button from '@/components/atoms/Button'
+import ProgressBar from '@/components/atoms/ProgressBar'
+import s3Service from '@/services/api/s3Service'
+import ApperIcon from '@/components/ApperIcon'
 
 const FileUploader = ({ currentPath = '', onUploadComplete, className = "" }) => {
-  // State management
-  const [uploadTasks, setUploadTasks] = useState([]);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  
-  // Refs
-  const fileInputRef = useRef(null);
-
-  // Helper function to safely serialize objects for postMessage
-  function serializeObject(obj, visited = new WeakSet()) {
-    if (obj === null || typeof obj !== 'object') {
-      return obj;
-    }
-    
-    // Prevent circular references
-    if (visited.has(obj)) {
-      return '[Circular Reference]';
-    }
-    visited.add(obj);
-    
-    // Handle arrays
-    if (Array.isArray(obj)) {
-      return obj.map(item => serializeObject(item, visited));
-    }
-// Handle all non-cloneable objects that would cause DataCloneError
-    if ((typeof window !== 'undefined' && typeof window.Request !== 'undefined' && obj instanceof window.Request) || 
-        (typeof window !== 'undefined' && typeof window.Response !== 'undefined' && obj instanceof window.Response) || 
-        (typeof window !== 'undefined' && typeof window.File !== 'undefined' && obj instanceof window.File) || 
-        (typeof Blob !== 'undefined' && obj instanceof Blob) ||
-        (typeof Map !== 'undefined' && obj instanceof Map) ||
-        (typeof Set !== 'undefined' && obj instanceof Set) ||
-        (typeof WeakMap !== 'undefined' && obj instanceof WeakMap) ||
-        (typeof WeakSet !== 'undefined' && obj instanceof WeakSet) ||
-        (typeof Symbol !== 'undefined' && typeof obj === 'symbol') ||
-        (typeof BigInt !== 'undefined' && typeof obj === 'bigint') ||
-        typeof obj === 'function' || 
-        obj instanceof Error ||
-        obj instanceof RegExp ||
-        (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) ||
-        (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
-        (typeof DataView !== 'undefined' && obj instanceof DataView) ||
-        (obj && typeof obj.constructor === 'function' && obj.constructor.name && 
-         ['HTMLElement', 'Element', 'Node', 'Window', 'Document'].includes(obj.constructor.name))) {
-      
-      // Create safe representation
-      const safeObj = {
-        type: obj.constructor?.name || typeof obj,
-        toString: '[Non-serializable Object]'
-      };
-      
-      // Add specific handling for different types
-try {
-        if (typeof window !== 'undefined' && typeof window.File !== 'undefined' && obj instanceof window.File) {
-          safeObj.name = obj.name;
-          safeObj.size = obj.size;
-          safeObj.type = obj.type;
-          safeObj.lastModified = obj.lastModified;
-        } else if (obj instanceof Error) {
-          safeObj.message = obj.message;
-          safeObj.stack = obj.stack;
-          safeObj.name = obj.name;
-        } else if (obj.toString && typeof obj.toString === 'function') {
-          safeObj.toString = obj.toString();
-        }
-      } catch (error) {
-        safeObj.toString = '[Unserializable]';
-      }
-      
-      return safeObj;
-    }
-    
-    // Handle Date objects
-    if (obj instanceof Date) {
-      return obj.toISOString();
-    }
-    
-    // Handle regular objects
-    const result = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        try {
-          result[key] = serializeObject(obj[key], visited);
-        } catch (error) {
-          result[key] = '[Unserializable]';
-        }
-      }
-    }
-    
-    return result;
-  }
-
-// Send notification to parent window with comprehensive error handling
-  function notifyParentLocal(data) {
-    try {
-      const serializedData = serializeObject(data);
-      
-      // Additional safety check before postMessage
-      if (typeof serializedData !== 'object' || serializedData === null) {
-        console.warn('Invalid data for postMessage:', serializedData);
-        return;
-      }
-      
-      if (window.parent && window.parent.postMessage) {
-        window.parent.postMessage(serializedData, '*');
-      }
-    } catch (error) {
-      console.error('Failed to notify parent:', error);
-      
-      // Fallback: send minimal safe data
-      try {
-        if (window.parent && window.parent.postMessage) {
-          window.parent.postMessage({
-            type: 'error',
-            message: 'Failed to serialize upload data',
-            timestamp: new Date().toISOString()
-          }, '*');
-        }
-      } catch (fallbackError) {
-        console.error('Even fallback postMessage failed:', fallbackError);
-      }
-    }
-  }
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [uploadTasks, setUploadTasks] = useState([])
+  const [isUploading, setIsUploading] = useState(false)
+  const fileInputRef = useRef(null)
 
   const handleDragOver = (e) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  };
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
   const handleDragLeave = (e) => {
     e.preventDefault()
     setIsDragOver(false)
@@ -172,15 +37,16 @@ try {
     if (files.length > 0) {
       handleFileUpload(files)
     }
-    e.target.value = ''
+    e.target.value = '' // Reset input
   }
 
-  const handleFileUpload = async (files) => {
+const handleFileUpload = async (files) => {
     if (files.length === 0) return
 
     try {
       setIsUploading(true)
       
+      // Use actual S3 service for uploads with progress tracking
       const uploadPromises = files.map(async (file) => {
         const taskId = Math.random().toString(36).substr(2, 9)
         const task = {
@@ -211,12 +77,6 @@ try {
           
           toast.success(`Successfully uploaded ${file.name}`)
 
-notifyParentLocal({
-            type: 'file_upload_complete',
-            status: 'success',
-            message: `Uploaded ${file.name}`
-          });
-
         } catch (error) {
           setUploadTasks(prev => prev.map(t => 
             t.id === taskId 
@@ -225,12 +85,6 @@ notifyParentLocal({
           ))
           
           toast.error(`Failed to upload ${file.name}: ${error.message}`)
-
-notifyParentLocal({
-            type: 'file_upload_failed',
-            status: 'error',
-            message: `Failed to upload ${file.name}`
-          });
         }
 
         return task
@@ -238,30 +92,34 @@ notifyParentLocal({
 
       await Promise.all(uploadPromises)
 
+      // Clear completed tasks after a delay
       setTimeout(() => {
         setUploadTasks(prev => prev.filter(task => task.status === 'error'))
         onUploadComplete?.()
       }, 2000)
 
     } catch (err) {
-      console.error('Upload batch failed:', err)
-      toast.error(`Upload failed: ${err.message}`)
+      toast.error('Failed to start upload: ' + err.message)
     } finally {
       setIsUploading(false)
     }
   }
 
-  const retryTask = async (taskId) => {
+  const removeTask = (taskId) => {
+    setUploadTasks(prev => prev.filter(task => task.id !== taskId))
+  }
+
+const retryTask = async (taskId) => {
     const task = uploadTasks.find(t => t.id === taskId)
     if (!task) return
 
-    setUploadTasks(prev => prev.map(t => 
-      t.id === taskId 
-        ? { ...t, status: 'uploading', progress: 0, error: null }
-        : t
-    ))
-
     try {
+      setUploadTasks(prev => prev.map(t => 
+        t.id === taskId 
+          ? { ...t, status: 'uploading', progress: 0, error: null }
+          : t
+      ))
+
       await s3Service.uploadFile(task.file, currentPath, (progress, speed) => {
         setUploadTasks(prev => prev.map(t => 
           t.id === taskId 
@@ -278,24 +136,19 @@ notifyParentLocal({
       
       toast.success(`Successfully uploaded ${task.file.name}`)
 
-notifyParentLocal({
-        type: 'file_upload_complete',
-        status: 'success',
-        message: `Uploaded ${task.file.name}`
-      });
+      setTimeout(() => {
+        removeTask(taskId)
+        onUploadComplete?.()
+      }, 2000)
 
-    } catch (error) {
+    } catch (err) {
       setUploadTasks(prev => prev.map(t => 
         t.id === taskId 
-          ? { ...t, status: 'error', error: error.message }
+          ? { ...t, status: 'error', error: err.message }
           : t
       ))
-      toast.error(`Retry failed: ${error.message}`)
+      toast.error(`Retry failed: ${err.message}`)
     }
-  }
-
-  const removeTask = (taskId) => {
-    setUploadTasks(prev => prev.filter(t => t.id !== taskId))
   }
 
   const formatFileSize = (bytes) => {
@@ -312,6 +165,7 @@ notifyParentLocal({
 
   return (
     <div className={`space-y-6 ${className}`}>
+      {/* Upload Zone */}
       <motion.div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -366,6 +220,7 @@ notifyParentLocal({
         />
       </motion.div>
 
+      {/* Upload Progress */}
       <AnimatePresence>
         {uploadTasks.length > 0 && (
           <motion.div

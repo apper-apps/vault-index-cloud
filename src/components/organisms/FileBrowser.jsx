@@ -533,17 +533,17 @@ const [selectedFiles, setSelectedFiles] = useState(new Set())
             </motion.div>
           </motion.div>
         )}
-</AnimatePresence>
+      </AnimatePresence>
     </div>
   )
 
   // Handler functions for preview and share
-  function handlePreview(file) {
+  const handlePreview = (file) => {
     setPreviewFile(file)
     setShowPreview(true)
   }
 
-  function handleShare(file) {
+  const handleShare = (file) => {
     setShareModalFile(file)
     setShowShareModal(true)
   }

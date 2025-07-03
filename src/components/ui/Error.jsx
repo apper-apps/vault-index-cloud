@@ -10,16 +10,12 @@ const Error = ({ message = "Something went wrong", onRetry, type = 'default' }) 
         return 'ShieldAlert'
       case 'file':
         return 'FileX'
-      case 'preview':
-        return 'Eye'
-      case 'share':
-        return 'Share2'
       default:
         return 'AlertTriangle'
     }
   }
 
-const getErrorTitle = () => {
+  const getErrorTitle = () => {
     switch (type) {
       case 'connection':
         return 'Connection Failed'
@@ -27,14 +23,11 @@ const getErrorTitle = () => {
         return 'Authentication Error'
       case 'file':
         return 'File Operation Failed'
-      case 'preview':
-        return 'Preview Failed'
-      case 'share':
-        return 'Share Failed'
       default:
         return 'Error Occurred'
     }
   }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}

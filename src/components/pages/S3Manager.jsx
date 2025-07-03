@@ -7,7 +7,7 @@ import FileUploader from "@/components/organisms/FileUploader";
 import FileBrowser from "@/components/organisms/FileBrowser";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
-const S3Manager = () => {
+const S3ManagerPage = () => {
   const [activeConfig, setActiveConfig] = useState(null)
   const [currentPath, setCurrentPath] = useState('')
   const [activeTab, setActiveTab] = useState('browser')
@@ -41,27 +41,15 @@ const S3Manager = () => {
 const handleUploadComplete = () => {
     // Refresh file browser if it's the active tab
     if (activeTab === 'browser') {
-      try {
-        window.dispatchEvent(new window.CustomEvent('refreshFiles'))
-      } catch (error) {
-        console.error('Failed to dispatch refresh event:', error)
-        // Fallback: force page refresh if custom event fails
-        window.location.reload()
-      }
+      window.dispatchEvent(new CustomEvent('refreshFiles'))
     }
     // Force a reload of the active config to ensure consistency
     loadActiveConfig()
   }
 
   const handleRefresh = () => {
-    // Trigger refresh for file browser with error handling
-    try {
-      window.dispatchEvent(new window.CustomEvent('refreshFiles'))
-    } catch (error) {
-      console.error('Failed to dispatch refresh event:', error)
-      // Fallback: force page refresh if custom event fails
-      window.location.reload()
-    }
+    // Trigger refresh for file browser
+    window.dispatchEvent(new window.CustomEvent('refreshFiles'))
   }
 
   if (loading) {
@@ -217,4 +205,4 @@ const handleUploadComplete = () => {
   )
 }
 
-export default S3Manager
+export default S3ManagerPage

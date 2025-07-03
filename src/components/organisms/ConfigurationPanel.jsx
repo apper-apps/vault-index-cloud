@@ -1,149 +1,22 @@
-import React, { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import { toast } from "react-toastify";
-import ApperIcon from "@/components/ApperIcon";
-import Input from "@/components/atoms/Input";
-import Button from "@/components/atoms/Button";
-import StatusIndicator from "@/components/molecules/StatusIndicator";
-import Error from "@/components/ui/Error";
-import Loading from "@/components/ui/Loading";
-import bucketConfigService from "@/services/api/bucketConfigService";
+import { useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
+import { toast } from 'react-toastify'
+import Input from '@/components/atoms/Input'
+import Button from '@/components/atoms/Button'
+import StatusIndicator from '@/components/molecules/StatusIndicator'
+import Loading from '@/components/ui/Loading'
+import Error from '@/components/ui/Error'
+import bucketConfigService from '@/services/api/bucketConfigService'
+import ApperIcon from '@/components/ApperIcon'
 
-// Send notification to parent window with comprehensive error handling
-function notifyParent(data) {
-  if (window.parent && window.parent.postMessage) {
-    try {
-      const serializedData = deepSerialize(data);
-      
-      // Additional safety check before postMessage
-      if (typeof serializedData !== 'object' || serializedData === null) {
-        console.warn('Invalid data for postMessage:', serializedData);
-        return;
-      }
-      
-      window.parent.postMessage(serializedData, '*');
-    } catch (error) {
-      console.error('Failed to notify parent:', error);
-      
-      // Fallback: send minimal safe data
-      try {
-        window.parent.postMessage({
-          type: 'error',
-          message: 'Failed to serialize data',
-          timestamp: new Date().toISOString()
-        }, '*');
-      } catch (fallbackError) {
-        console.error('Even fallback postMessage failed:', fallbackError);
-      }
-    }
-  }
-}
-
-// Helper function to safely serialize objects for postMessage
-function serializeObject(obj, visited = new WeakSet()) {
-  if (obj === null || typeof obj !== 'object') {
-    return obj;
-  }
-  
-  // Prevent circular references
-  if (visited.has(obj)) {
-    return '[Circular Reference]';
-  }
-  visited.add(obj);
-  
-  // Handle arrays
-  if (Array.isArray(obj)) {
-    return obj.map(item => serializeObject(item, visited));
-  }
-  
-  // Handle all non-cloneable objects that would cause DataCloneError
-  if ((typeof Request !== 'undefined' && obj instanceof Request) || 
-      (typeof Response !== 'undefined' && obj instanceof Response) || 
-      (typeof File !== 'undefined' && obj instanceof File) || 
-      (typeof Blob !== 'undefined' && obj instanceof Blob) ||
-      (typeof Map !== 'undefined' && obj instanceof Map) ||
-      (typeof Set !== 'undefined' && obj instanceof Set) ||
-      (typeof WeakMap !== 'undefined' && obj instanceof WeakMap) ||
-      (typeof WeakSet !== 'undefined' && obj instanceof WeakSet) ||
-      (typeof Symbol !== 'undefined' && typeof obj === 'symbol') ||
-      (typeof BigInt !== 'undefined' && typeof obj === 'bigint') ||
-      typeof obj === 'function' || 
-      obj instanceof Error ||
-      obj instanceof RegExp ||
-      (typeof ArrayBuffer !== 'undefined' && obj instanceof ArrayBuffer) ||
-      (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) ||
-      (typeof DataView !== 'undefined' && obj instanceof DataView) ||
-      (obj && typeof obj.constructor === 'function' && obj.constructor.name && 
-       ['HTMLElement', 'Element', 'Node', 'Window', 'Document'].includes(obj.constructor.name))) {
-    
-    // Create safe representation
-    const safeObj = {
-      type: obj.constructor?.name || typeof obj,
-      toString: '[Non-serializable Object]'
-    };
-    
-    // Add specific handling for different types
-    try {
-      if (obj instanceof Map) {
-        safeObj.entries = Array.from(obj.entries()).map(([k, v]) => [
-          serializeObject(k, visited), 
-          serializeObject(v, visited)
-        ]);
-      } else if (obj instanceof Set) {
-        safeObj.values = Array.from(obj).map(v => serializeObject(v, visited));
-      } else if (obj instanceof Error) {
-        safeObj.message = obj.message;
-        safeObj.stack = obj.stack;
-        safeObj.name = obj.name;
-      } else if (obj instanceof RegExp) {
-        safeObj.source = obj.source;
-        safeObj.flags = obj.flags;
-      } else if (obj.toString && typeof obj.toString === 'function') {
-        safeObj.toString = obj.toString();
-      }
-    } catch (error) {
-      safeObj.toString = '[Unserializable]';
-    }
-    
-    return safeObj;
-  }
-  
-  // Handle Date objects
-  if (obj instanceof Date) {
-    return obj.toISOString();
-  }
-  
-  // Handle regular objects
-  const result = {};
-  for (const key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      try {
-        result[key] = serializeObject(obj[key], visited);
-      } catch (error) {
-        result[key] = '[Unserializable]';
-      }
-    }
-  }
-  
-  return result;
-}
-
-// Deep serialize with additional safety checks
-function deepSerialize(data) {
-  try {
-    // First attempt: JSON round-trip to catch most issues
-    const jsonString = JSON.stringify(data);
-    return JSON.parse(jsonString);
-  } catch (error) {
-    // Fallback: manual serialization
-    return serializeObject(data);
-  }
-}
-
-const ConfigurationPanel = ({ className, onConfigSaved }) => {
+const ConfigurationPanel = ({ onConfigSaved, className = "" }) => {
   const [configs, setConfigs] = useState([])
+  const [activeConfig, setActiveConfig] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [testing, setTesting] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  
   const [formData, setFormData] = useState({
     name: '',
     accessKey: '',
@@ -151,9 +24,7 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
     region: 'us-east-1',
     bucketName: ''
   })
-  const [testing, setTesting] = useState(false)
-  const [showForm, setShowForm] = useState(false)
-  const [activeConfig, setActiveConfig] = useState(null)
+
   const [formErrors, setFormErrors] = useState({})
 
   useEffect(() => {
@@ -202,24 +73,10 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
     
     try {
       setTesting(true)
-      
-      const testData = {
-        accessKey: formData.accessKey.trim(),
-        secretKey: formData.secretKey.trim(),
-        region: formData.region.trim(),
-        bucketName: formData.bucketName.trim()
-      }
-      
-      const result = await bucketConfigService.testConnection(testData)
-      
-      if (result.success) {
-        toast.success('Connection test successful!')
-      } else {
-        toast.error(result.message || 'Connection test failed')
-      }
+      await bucketConfigService.testConnection(formData)
+      toast.success('Connection test successful!')
     } catch (err) {
-      console.error('Test connection error:', err)
-      toast.error(err.message || 'Failed to test connection')
+      toast.error(err.message)
     } finally {
       setTesting(false)
     }
@@ -229,38 +86,9 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
     if (!validateForm()) return
     
     try {
-      const configData = {
-        name: formData.name.trim(),
-        accessKey: formData.accessKey.trim(),
-        secretKey: formData.secretKey.trim(),
-        region: formData.region.trim(),
-        bucketName: formData.bucketName.trim()
-      }
-      
-      const savedConfig = await bucketConfigService.create(configData)
-      
+      const savedConfig = await bucketConfigService.create(formData)
       setConfigs(prev => [...prev, savedConfig])
       setActiveConfig(savedConfig)
-      
-      // Notify parent with simple data
-      notifyParent({
-        type: 'config_saved',
-        status: 'success',
-        message: 'Configuration saved successfully'
-      })
-      
-      // Call callback if provided
-      if (onConfigSaved) {
-        onConfigSaved({
-          Id: savedConfig.Id,
-          name: savedConfig.name,
-          bucketName: savedConfig.bucketName,
-          region: savedConfig.region,
-          isActive: savedConfig.isActive
-        })
-      }
-      
-      // Reset form
       setFormData({
         name: '',
         accessKey: '',
@@ -269,11 +97,10 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
         bucketName: ''
       })
       setShowForm(false)
-      
       toast.success('Configuration saved successfully!')
+      onConfigSaved?.(savedConfig)
     } catch (err) {
-      console.error('Save config error:', err)
-      toast.error(err.message || 'Failed to save configuration')
+      toast.error(err.message)
     }
   }
 
@@ -282,27 +109,10 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
       const updatedConfig = await bucketConfigService.setActive(configId)
       setActiveConfig(updatedConfig)
       setConfigs(prev => prev.map(c => ({ ...c, isActive: c.Id === configId })))
-      
-      notifyParent({
-        type: 'config_activated',
-        status: 'success',
-        message: 'Configuration activated'
-      })
-      
-      if (onConfigSaved) {
-        onConfigSaved({
-          Id: updatedConfig.Id,
-          name: updatedConfig.name,
-          bucketName: updatedConfig.bucketName,
-          region: updatedConfig.region,
-          isActive: updatedConfig.isActive
-        })
-      }
-      
       toast.success('Configuration activated!')
+      onConfigSaved?.(updatedConfig)
     } catch (err) {
-      console.error('Configuration activation error:', err)
-      toast.error(err.message || 'Failed to activate configuration')
+      toast.error(err.message)
     }
   }
 
@@ -315,13 +125,6 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
       if (activeConfig?.Id === configId) {
         setActiveConfig(null)
       }
-      
-      notifyParent({
-        type: 'config_deleted',
-        status: 'success',
-        message: 'Configuration deleted'
-      })
-      
       toast.success('Configuration deleted!')
     } catch (err) {
       toast.error(err.message)
@@ -397,7 +200,7 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
                 placeholder="AKIAIOSFODNN7EXAMPLE"
                 required
               />
-              
+
               <Input
                 label="Secret Key"
                 type="password"
@@ -408,6 +211,7 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
                 required
               />
             </div>
+</div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
@@ -427,7 +231,6 @@ const ConfigurationPanel = ({ className, onConfigSaved }) => {
                 placeholder="my-s3-bucket"
                 required
               />
-            </div>
 
             <div className="flex gap-3 pt-4">
               <Button
