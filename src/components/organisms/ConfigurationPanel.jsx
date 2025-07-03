@@ -27,7 +27,6 @@ const serializeForApper = (obj, visited = new WeakSet()) => {
       return '[Circular Reference]';
     }
     visited.add(obj);
-visited.add(obj);
     
     // Handle specific problematic types comprehensively
     if (typeof Request !== 'undefined' && obj instanceof Request) {
@@ -40,7 +39,8 @@ visited.add(obj);
         credentials: obj.credentials
       };
     }
-if (typeof Response !== 'undefined' && obj instanceof Response) {
+    
+    if (typeof Response !== 'undefined' && obj instanceof Response) {
       return {
         __type: 'Response',
         status: obj.status,
@@ -50,6 +50,7 @@ if (typeof Response !== 'undefined' && obj instanceof Response) {
         type: obj.type
       };
     }
+    
     if (obj instanceof Promise) {
       return { __type: 'Promise', state: 'pending' };
     }
@@ -70,7 +71,6 @@ if (typeof Response !== 'undefined' && obj instanceof Response) {
     if (obj instanceof Date) {
       return { __type: 'Date', value: obj.toISOString() };
     }
-}
     
     if (typeof File !== 'undefined' && obj instanceof File) {
       return {
