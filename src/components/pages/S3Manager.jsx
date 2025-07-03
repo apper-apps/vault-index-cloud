@@ -3,12 +3,12 @@ import { motion } from "framer-motion";
 import { toast } from "react-toastify";
 import ApperIcon from "@/components/ApperIcon";
 import ConfigurationPanel from "@/components/organisms/ConfigurationPanel";
+import FileUploader from "@/components/organisms/FileUploader";
 import FileBrowser from "@/components/organisms/FileBrowser";
 import bucketConfigService from "@/services/api/bucketConfigService";
 
 const S3ManagerPage = () => {
-  const [activeConfig, setActiveConfig] = useState(null)
-  const [currentPath, setCurrentPath] = useState('')
+const [activeConfig, setActiveConfig] = useState(null)
   const [currentPath, setCurrentPath] = useState('')
   const [activeTab, setActiveTab] = useState('browser')
   const [loading, setLoading] = useState(true)
@@ -55,9 +55,11 @@ const handleUploadComplete = () => {
     // Refresh file browser if it's the active tab
     if (activeTab === 'browser') {
       try {
-        window.dispatchEvent(new CustomEvent('refreshFiles', { 
-          detail: { timestamp: Date.now() } 
-        }))
+        if (typeof window !== 'undefined' && window.CustomEvent) {
+          window.dispatchEvent(new window.CustomEvent('refreshFiles', { 
+            detail: { timestamp: Date.now() } 
+          }))
+        }
       } catch (eventError) {
         console.error('Failed to dispatch refresh event:', eventError)
       }
@@ -66,12 +68,14 @@ const handleUploadComplete = () => {
     loadActiveConfig()
   }
 
-  const handleRefresh = () => {
+const handleRefresh = () => {
     // Trigger refresh for file browser with consistent event creation
     try {
-      window.dispatchEvent(new CustomEvent('refreshFiles', { 
-        detail: { timestamp: Date.now(), source: 'manual' } 
-      }))
+      if (typeof window !== 'undefined' && window.CustomEvent) {
+        window.dispatchEvent(new window.CustomEvent('refreshFiles', { 
+          detail: { timestamp: Date.now(), source: 'manual' } 
+        }))
+      }
     } catch (eventError) {
       console.error('Failed to dispatch refresh event:', eventError)
     }
